@@ -19,7 +19,7 @@ from googleapiclient.http import MediaIoBaseUpload
 # ==========================================
 # ⚙️ 1. ตั้งค่าระบบ
 # ==========================================
-st.set_page_config(page_title="Nami Admin V93", layout="wide", page_icon="🧾")
+st.set_page_config(page_title="Nami Admin V94", layout="wide", page_icon="🧾")
 
 ADMIN_PASSWORD = "3457"
 DRIVE_FOLDER_ID = "1hFTlfxFhAeew_LUjC224pG2Zs2wsE6lG" # 🟢 แก้ ID ตรงนี้
@@ -127,11 +127,10 @@ def generate_pdf_v90(doc_data, items, doc_type, running_no):
 
         c.setFont(FONT_NAME, font_bold); c.drawRightString(label_anchor, curr_y, "ที่อยู่ :")
         c.setFont(FONT_NAME, font_std)
-        avail_w_addr = div_x - (label_anchor + 5) - 5
-        addr_lines = wrap_text_lines(doc_data['cust_addr'], avail_w_addr, FONT_NAME, font_std)
-        for line in addr_lines:
-            c.drawString(label_anchor + 5, curr_y, line)
-            curr_y -= 10
+        style = ParagraphStyle('Normal', fontName=FONT_NAME, fontSize=11, leading=12)
+        p = Paragraph(doc_data['cust_addr'], style)
+        f_addr = Frame(label_anchor + 5, info_box_btm + 15, avail_w, (curr_y - info_box_btm) + 5, showBoundary=0, topPadding=0)
+        f_addr.addFromList([p], c)
 
         tel_y = info_box_btm + 5
         c.setFont(FONT_NAME, font_bold); c.drawRightString(label_anchor, tel_y, "โทรศัพท์ :")
@@ -192,23 +191,18 @@ def generate_pdf_v90(doc_data, items, doc_type, running_no):
 
     if doc_type == "ABB": draw_invoice(half_height)
     else: draw_invoice(half_height); c.setDash(3, 3); c.line(10, half_height, width-10, half_height); c.setDash(1, 0); draw_invoice(0)
-    
-    c.save(); buffer.seek(0)
-    return buffer
+    c.save(); buffer.seek(0); return buffer
 
 # ==========================================
-# 🖥️ 5. Main App UI
+# 🖥️ 5. Init State & Load Data
 # ==========================================
-# 🟢 Initialize Session State Variables (สำคัญมากสำหรับการรับค่า)
+# 🟢 เริ่มต้นตัวแปร Session State (ต้องทำก่อนวาดหน้าจอ)
 if 'logged_in' not in st.session_state: st.session_state.logged_in = False
 if 'cart' not in st.session_state: st.session_state.cart = []
 # ตัวแปรฟอร์ม
-if 'form_name' not in st.session_state: st.session_state.form_name = ""
-if 'form_tax' not in st.session_state: st.session_state.form_tax = ""
-if 'form_h' not in st.session_state: st.session_state.form_h = ""
-if 'form_d' not in st.session_state: st.session_state.form_d = ""
-if 'form_p' not in st.session_state: st.session_state.form_p = ""
-if 'form_tel' not in st.session_state: st.session_state.form_tel = ""
+keys = ['form_name', 'form_tax', 'form_h', 'form_d', 'form_p', 'form_tel']
+for k in keys:
+    if k not in st.session_state: st.session_state[k] = ""
 
 # --- Login Logic ---
 if not st.session_state.logged_in:
@@ -223,24 +217,16 @@ if not st.session_state.logged_in:
             else: st.error("รหัสผ่านไม่ถูกต้อง")
     st.stop()
 
-# --- Main App ---
-st.title("🧾 Nami Invoice (V93 Web Edition)")
-
+# Load Data
 try:
     client = get_sheet_client()
     sh = client.open(SHEET_NAME)
-    
-    ws_conf = sh.worksheet("Config")
-    raw_conf = ws_conf.get_all_values()
+    ws_conf = sh.worksheet("Config"); raw_conf = ws_conf.get_all_values()
     conf_data = {}
     for row in raw_conf:
         if len(row) >= 2: conf_data[str(row[0]).strip()] = str(row[1]).strip()
     
-    seller_info = {
-        "n": conf_data.get("ShopName", "Nami Shop"),
-        "t": conf_data.get("TaxID", "000"),
-        "a": conf_data.get("Address", "Address")
-    }
+    seller_info = {"n": conf_data.get("ShopName", "Nami"), "t": conf_data.get("TaxID", ""), "a": conf_data.get("Address", "")}
     try: cust_df = pd.DataFrame(sh.worksheet("Customers").get_all_records())
     except: cust_df = pd.DataFrame(columns=['Name'])
     try: item_df = pd.DataFrame(sh.worksheet("Items").get_all_records())
@@ -248,7 +234,43 @@ try:
 except Exception as e:
     st.error(f"DB Error: {e}"); st.stop()
 
-# --- Layout ---
+# ==========================================
+# ⚡️ 6. Logic Processing (ต้องอยู่ก่อนวาด Layout)
+# ==========================================
+# 🔴 Sidebar Logic: ย้ายมาไว้ตรงนี้ เพื่อให้กดปุ่มแล้วอัปเดต State ก่อนวาดหน้าจอ
+with st.sidebar:
+    st.header("☁️ รายการรอคิว (Queue)")
+    if st.button("🔄 รีเฟรชคิว"): st.rerun()
+    try:
+        q_data = sh.worksheet("Queue").get_all_records()
+        q_df = pd.DataFrame(q_data)
+        if not q_df.empty and 'Status' in q_df.columns:
+            pending = q_df[q_df['Status'] != 'Done']
+            if not pending.empty:
+                for i, r in pending.iterrows():
+                    st.warning(f"**{r['Name']}** ({r['Price']})")
+                    # ✅ ปุ่มดึงข้อมูล: อัปเดต State แล้ว Rerun ทันที
+                    if st.button("ดึงข้อมูล", key=f"pull_{i}"):
+                        h, d, p = smart_clean_address(r['Address1'], r['Address2'])
+                        st.session_state.form_name = r['Name']
+                        st.session_state.form_tax = str(r['TaxID'])
+                        st.session_state.form_h = h
+                        st.session_state.form_d = d
+                        st.session_state.form_p = p
+                        st.session_state.form_tel = str(r['Phone'])
+                        
+                        # Add item to cart
+                        if r['Item']:
+                            st.session_state.cart = [{"name": r['Item'], "qty": 1, "price": float(str(r['Price']).replace(',',''))}]
+                        
+                        st.rerun() # 🚀 บังคับรีเฟรชหน้าจอเพื่อแสดงค่าใหม่
+            else: st.success("ไม่มีคิวค้าง")
+    except Exception as e: st.error(f"Queue Error: {e}")
+
+# ==========================================
+# 🖥️ 7. Layout & Form (วาดทีหลัง Logic)
+# ==========================================
+st.title("🧾 Nami Invoice (V94 Web Edition)")
 col_L, col_R = st.columns([1, 1.5])
 
 with col_L:
@@ -258,11 +280,10 @@ with col_L:
         st.text_area("ที่อยู่", value=seller_info['a'], disabled=True, height=80)
 
     st.markdown("### 👤 ข้อมูลลูกค้า")
-    # Search Customer
     cust_list = [""] + list(cust_df['Name'].unique()) if not cust_df.empty else [""]
     selected_cust = st.selectbox("🔍 ค้นหาลูกค้า (ชื่อ)", cust_list)
-    
-    # 🟢 Logic: เมื่อเลือกชื่อลูกค้า ให้ยัดค่าใส่ Session State ทันที
+
+    # Search Logic: ถ้าเลือก Dropdown ให้เปลี่ยน State แล้ว Rerun
     if selected_cust and selected_cust != st.session_state.get('last_selected_cust'):
         row = cust_df[cust_df['Name'] == selected_cust].iloc[0]
         h, d, p = smart_clean_address(row['Address1'], row['Address2'])
@@ -275,7 +296,7 @@ with col_L:
         st.session_state.last_selected_cust = selected_cust
         st.rerun()
 
-    # 🟢 Form Inputs (ผูกกับ Session State)
+    # 🟢 Text Inputs ผูกกับ Session State โดยตรง
     c_name = st.text_input("ชื่อลูกค้า", key="form_name")
     c_tax = st.text_input("เลขผู้เสียภาษี", key="form_tax")
     c_h = st.text_input("ที่อยู่ (เลขที่/ถนน)", key="form_h")
@@ -337,34 +358,3 @@ with col_R:
                         st.download_button("⬇️ ดาวน์โหลด PDF", data=pdf_buffer, file_name=fname, mime="application/pdf")
                     else: st.error(f"Backup ล้มเหลว: {res}")
     else: st.info("ยังไม่มีสินค้าในตะกร้า")
-
-# --- Sidebar: Queue Manager (Fixed Pull Logic) ---
-with st.sidebar:
-    st.header("☁️ รายการรอคิว (Queue)")
-    if st.button("🔄 รีเฟรชคิว"): st.rerun()
-    try:
-        q_data = sh.worksheet("Queue").get_all_records()
-        q_df = pd.DataFrame(q_data)
-        if not q_df.empty and 'Status' in q_df.columns:
-            pending = q_df[q_df['Status'] != 'Done']
-            if not pending.empty:
-                for i, r in pending.iterrows():
-                    st.warning(f"**{r['Name']}** ({r['Price']})")
-                    # 🟢 ปุ่มดึงข้อมูล: อัปเดต Session State แล้ว Rerun
-                    if st.button("ดึงข้อมูล", key=f"pull_{i}"):
-                        h, d, p = smart_clean_address(r['Address1'], r['Address2'])
-                        st.session_state.form_name = r['Name']
-                        st.session_state.form_tax = str(r['TaxID'])
-                        st.session_state.form_h = h
-                        st.session_state.form_d = d
-                        st.session_state.form_p = p
-                        st.session_state.form_tel = str(r['Phone'])
-                        
-                        # (Optional) Auto-add item to cart
-                        if r['Item']:
-                            st.session_state.cart = [{"name": r['Item'], "qty": 1, "price": float(str(r['Price']).replace(',',''))}]
-                        
-                        st.rerun() # บังคับรีเฟรชหน้าจอให้ช่องกรอกเปลี่ยนค่า
-                        
-            else: st.success("ไม่มีคิวค้าง")
-    except Exception as e: st.error(f"Queue Error: {e}")
