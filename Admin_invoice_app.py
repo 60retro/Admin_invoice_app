@@ -21,7 +21,7 @@ from googleapiclient.http import MediaIoBaseUpload
 st.set_page_config(page_title="Nami Admin V90", layout="wide", page_icon="🧾")
 
 # 🔒 รหัสผ่านเข้าใช้งาน (Admin Password)
-ADMIN_PASSWORD = "1234" 
+ADMIN_PASSWORD = "3457" 
 
 # 🟢 ใส่ ID โฟลเดอร์ Google Drive สำหรับ Backup ไฟล์ PDF
 DRIVE_FOLDER_ID = "1hFTlfxFhAeew_LUjC224pG2Zs2wsE6lG" 
