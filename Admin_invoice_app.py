@@ -62,31 +62,29 @@ def upload_to_drive(file_obj, filename):
     try:
         service = get_drive_service()
         
-        # Metadata ระบุว่าไฟล์นี้ "เป็นลูก" ของโฟลเดอร์ ID นี้
         file_metadata = {
             'name': filename,
-            'parents': [DRIVE_FOLDER_ID] 
+            'parents': [DRIVE_FOLDER_ID]  # บอทต้องเห็นโฟลเดอร์นี้ชัวร์ๆ
         }
         
-        # Reset pointer ก่อนอ่านไฟล์
+        # Reset pointer
         file_obj.seek(0)
         
-        # ใช้ MediaIoBaseUpload แบบ Resumable เพื่อความเสถียร
-        media = MediaIoBaseUpload(file_obj, mimetype='application/pdf', resumable=True)
+        # 🔴 เปลี่ยนเป็น resumable=False เพื่อเลี่ยงการเช็ค Quota ของบอท
+        media = MediaIoBaseUpload(file_obj, mimetype='application/pdf', resumable=False)
         
-        # สั่งสร้างไฟล์ (ถ้า ID ถูกและแชร์สิทธิ์ถูก ยังไงก็ผ่าน!)
+        # เพิ่ม supportsAllDrives=True เผื่อคุณใช้ Shared Drive
         file = service.files().create(
             body=file_metadata,
             media_body=media,
-            fields='id'
+            fields='id',
+            supportsAllDrives=True 
         ).execute()
         
         return True, file.get('id')
         
     except Exception as e:
-        # ถ้า Error ให้ลอง Debug ดูว่า ID โฟลเดอร์ถูกไหม
-        return False, f"Google Drive Error: {str(e)} (เช็คว่าแชร์โฟลเดอร์ให้บอทเป็น Editor หรือยัง?)"
-
+        return False, f"Upload Error: {str(e)} (กรุณาเช็ค Folder ID และการแชร์สิทธิ์อีกครั้ง)"
 # ==========================================
 # 🖨️ 4. PDF Engine (V90 Logic)
 # ==========================================
@@ -377,5 +375,6 @@ with col_R:
                         st.download_button("⬇️ ดาวน์โหลด PDF", data=pdf_buffer, file_name=fname, mime="application/pdf")
                     else: st.error(f"Backup ล้มเหลว: {res}")
     else: st.info("ยังไม่มีสินค้าในตะกร้า")
+
 
 
