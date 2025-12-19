@@ -22,7 +22,7 @@ from googleapiclient.http import MediaIoBaseUpload
 st.set_page_config(page_title="Nami Admin V94", layout="wide", page_icon="🧾")
 
 ADMIN_PASSWORD = "3457"
-DRIVE_FOLDER_ID = "1hFTlfxFhAeew_LUjC224pG2Zs2wsE6lG" # 🟢 แก้ ID ตรงนี้
+DRIVE_FOLDER_ID = "1zm2KN-W7jCfwYirs-nBVNTlROMyW19ur" # 🟢 แก้ ID ตรงนี้
 SHEET_NAME = "Invoice_Data"
 
 try:
@@ -377,4 +377,5 @@ with col_R:
                         st.download_button("⬇️ ดาวน์โหลด PDF", data=pdf_buffer, file_name=fname, mime="application/pdf")
                     else: st.error(f"Backup ล้มเหลว: {res}")
     else: st.info("ยังไม่มีสินค้าในตะกร้า")
+
 
