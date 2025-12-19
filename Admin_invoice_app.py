@@ -61,12 +61,31 @@ def smart_clean_address(addr1, addr2):
 def upload_to_drive(file_obj, filename):
     try:
         service = get_drive_service()
-        file_metadata = {'name': filename, 'parents': [DRIVE_FOLDER_ID]}
+        
+        # Metadata ระบุว่าไฟล์นี้ "เป็นลูก" ของโฟลเดอร์ ID นี้
+        file_metadata = {
+            'name': filename,
+            'parents': [DRIVE_FOLDER_ID] 
+        }
+        
+        # Reset pointer ก่อนอ่านไฟล์
         file_obj.seek(0)
+        
+        # ใช้ MediaIoBaseUpload แบบ Resumable เพื่อความเสถียร
         media = MediaIoBaseUpload(file_obj, mimetype='application/pdf', resumable=True)
-        file = service.files().create(body=file_metadata, media_body=media, fields='id').execute()
+        
+        # สั่งสร้างไฟล์ (ถ้า ID ถูกและแชร์สิทธิ์ถูก ยังไงก็ผ่าน!)
+        file = service.files().create(
+            body=file_metadata,
+            media_body=media,
+            fields='id'
+        ).execute()
+        
         return True, file.get('id')
-    except Exception as e: return False, str(e)
+        
+    except Exception as e:
+        # ถ้า Error ให้ลอง Debug ดูว่า ID โฟลเดอร์ถูกไหม
+        return False, f"Google Drive Error: {str(e)} (เช็คว่าแชร์โฟลเดอร์ให้บอทเป็น Editor หรือยัง?)"
 
 # ==========================================
 # 🖨️ 4. PDF Engine (V90 Logic)
@@ -358,3 +377,4 @@ with col_R:
                         st.download_button("⬇️ ดาวน์โหลด PDF", data=pdf_buffer, file_name=fname, mime="application/pdf")
                     else: st.error(f"Backup ล้มเหลว: {res}")
     else: st.info("ยังไม่มีสินค้าในตะกร้า")
+
