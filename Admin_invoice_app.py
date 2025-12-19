@@ -19,7 +19,7 @@ from googleapiclient.http import MediaIoBaseUpload
 # ==========================================
 # ⚙️ 1. ตั้งค่าระบบ
 # ==========================================
-st.set_page_config(page_title="Nami Admin V92", layout="wide", page_icon="🧾")
+st.set_page_config(page_title="Nami Admin V93", layout="wide", page_icon="🧾")
 
 ADMIN_PASSWORD = "3457"
 DRIVE_FOLDER_ID = "1hFTlfxFhAeew_LUjC224pG2Zs2wsE6lG" # 🟢 แก้ ID ตรงนี้
@@ -92,7 +92,6 @@ def generate_pdf_v90(doc_data, items, doc_type, running_no):
         margin = 15 * mm; base_y = y_offset; top_y = base_y + half_height - margin
         page_w = width - (2 * margin); font_std = 11; font_bold = 12; line_h = 12
         
-        # Shop Box
         box_w = 260; box_h = 80; box_x = width - margin - box_w; box_y = top_y - box_h + 10
         c.setLineWidth(1); c.roundRect(box_x, box_y, box_w, box_h, 8, stroke=1, fill=0)
         c.setFont(FONT_NAME, font_bold); c.drawString(box_x + 10, box_y + box_h - 15, doc_data['shop_name'])
@@ -104,14 +103,12 @@ def generate_pdf_v90(doc_data, items, doc_type, running_no):
                 if cur_sy < box_y + 5: break
                 c.drawString(box_x + 10, cur_sy, w); cur_sy -= line_h
 
-        # Doc Info
         title = "ใบกำกับภาษี / ใบเสร็จรับเงิน" if doc_type == "Full" else "ใบกำกับภาษีอย่างย่อ (ABB)"
         title_y = box_y - 20; c.setFont(FONT_NAME, font_bold + 2); c.drawCentredString(margin + ((box_x - margin) / 2), title_y, f"ต้นฉบับ {title}")
         bar_y = title_y - 20; c.setFont(FONT_NAME, font_std)
         c.drawString(margin, bar_y, f"เลขประจำตัวผู้เสียภาษีอากร : {doc_data['shop_tax']}")
         c.drawRightString(width - margin, bar_y, f"เลขที่ : {running_no}")
 
-        # Cust Box
         info_box_y = bar_y - 5; info_box_h = 75; info_box_btm = info_box_y - info_box_h
         c.rect(margin, info_box_btm, page_w, info_box_h)
         div_x = width - margin - 200; c.line(div_x, info_box_y, div_x, info_box_btm)
@@ -130,12 +127,11 @@ def generate_pdf_v90(doc_data, items, doc_type, running_no):
 
         c.setFont(FONT_NAME, font_bold); c.drawRightString(label_anchor, curr_y, "ที่อยู่ :")
         c.setFont(FONT_NAME, font_std)
-        
-        # Paragraph Style for Customer Addr
-        style = ParagraphStyle('Normal', fontName=FONT_NAME, fontSize=11, leading=12)
-        p = Paragraph(doc_data['cust_addr'], style)
-        f_addr = Frame(label_anchor + 5, info_box_btm + 15, avail_w, (curr_y - info_box_btm) + 5, showBoundary=0, topPadding=0)
-        f_addr.addFromList([p], c)
+        avail_w_addr = div_x - (label_anchor + 5) - 5
+        addr_lines = wrap_text_lines(doc_data['cust_addr'], avail_w_addr, FONT_NAME, font_std)
+        for line in addr_lines:
+            c.drawString(label_anchor + 5, curr_y, line)
+            curr_y -= 10
 
         tel_y = info_box_btm + 5
         c.setFont(FONT_NAME, font_bold); c.drawRightString(label_anchor, tel_y, "โทรศัพท์ :")
@@ -147,7 +143,6 @@ def generate_pdf_v90(doc_data, items, doc_type, running_no):
         c.setFont(FONT_NAME, font_std)
         c.drawString(dx + 85, dy, date_str); c.drawString(dx + 85, dy - 24, "สด")
 
-        # Table
         tbl_top = info_box_btm - 5
         c.setFillColorRGB(0.2, 0.2, 0.2); c.rect(margin, tbl_top - 14, page_w, 14, fill=1, stroke=1); c.setFillColorRGB(1, 1, 1)
         col_w = [25, page_w - 215, 45, 70, 75]
@@ -173,7 +168,6 @@ def generate_pdf_v90(doc_data, items, doc_type, running_no):
             c.drawRightString(col_x[4] + col_w[4] - 5, txt_y, f"{amt:,.2f}")
             curr_y -= row_h; c.setLineWidth(0.5); c.line(margin, curr_y, width - margin, curr_y)
 
-        # Footer
         btm = curr_y; c.rect(margin, btm, page_w, (tbl_top - 14) - btm)
         for x in col_x[1:]: c.line(x, tbl_top - 14, x, btm)
         
@@ -184,7 +178,6 @@ def generate_pdf_v90(doc_data, items, doc_type, running_no):
         f_top = btm; row_h = 14
         c.line(col_x[4], f_top, col_x[4], f_top - (5 * row_h))
         c.line(width - margin, f_top, width - margin, f_top - (5 * row_h))
-        
         for i in range(5):
             r_top = f_top - (i * row_h); r_btm = r_top - row_h; t_y = r_btm + 4
             c.line(col_x[4], r_btm, width - margin, r_btm)
@@ -206,8 +199,18 @@ def generate_pdf_v90(doc_data, items, doc_type, running_no):
 # ==========================================
 # 🖥️ 5. Main App UI
 # ==========================================
+# 🟢 Initialize Session State Variables (สำคัญมากสำหรับการรับค่า)
 if 'logged_in' not in st.session_state: st.session_state.logged_in = False
+if 'cart' not in st.session_state: st.session_state.cart = []
+# ตัวแปรฟอร์ม
+if 'form_name' not in st.session_state: st.session_state.form_name = ""
+if 'form_tax' not in st.session_state: st.session_state.form_tax = ""
+if 'form_h' not in st.session_state: st.session_state.form_h = ""
+if 'form_d' not in st.session_state: st.session_state.form_d = ""
+if 'form_p' not in st.session_state: st.session_state.form_p = ""
+if 'form_tel' not in st.session_state: st.session_state.form_tel = ""
 
+# --- Login Logic ---
 if not st.session_state.logged_in:
     col1, col2, col3 = st.columns([1,2,1])
     with col2:
@@ -220,38 +223,32 @@ if not st.session_state.logged_in:
             else: st.error("รหัสผ่านไม่ถูกต้อง")
     st.stop()
 
-st.title("🧾 Nami Invoice (V92 Web Edition)")
+# --- Main App ---
+st.title("🧾 Nami Invoice (V93 Web Edition)")
 
 try:
     client = get_sheet_client()
     sh = client.open(SHEET_NAME)
     
-    # 🔴 FIX: อ่าน Config แบบปลอดภัย (ทนทานต่อข้อมูลขาด)
     ws_conf = sh.worksheet("Config")
     raw_conf = ws_conf.get_all_values()
     conf_data = {}
     for row in raw_conf:
-        if len(row) >= 2: # ถ้ามีอย่างน้อย 2 ช่อง (Key, Value)
-            conf_data[str(row[0]).strip()] = str(row[1]).strip()
+        if len(row) >= 2: conf_data[str(row[0]).strip()] = str(row[1]).strip()
     
-    # ใช้ .get() เพื่อป้องกัน Key Error ถ้าหาไม่เจอ
     seller_info = {
-        "n": conf_data.get("ShopName", "Nami Shop (Default)"),
-        "t": conf_data.get("TaxID", "0000000000000"),
-        "a": conf_data.get("Address", "Bangkok, Thailand")
+        "n": conf_data.get("ShopName", "Nami Shop"),
+        "t": conf_data.get("TaxID", "000"),
+        "a": conf_data.get("Address", "Address")
     }
-    
-    # Load Customers & Items
     try: cust_df = pd.DataFrame(sh.worksheet("Customers").get_all_records())
-    except: cust_df = pd.DataFrame(columns=['Name', 'TaxID', 'Address1', 'Address2', 'Phone'])
-        
+    except: cust_df = pd.DataFrame(columns=['Name'])
     try: item_df = pd.DataFrame(sh.worksheet("Items").get_all_records())
     except: item_df = pd.DataFrame(columns=['ItemName'])
-    
 except Exception as e:
-    st.error(f"เชื่อมต่อ Database ไม่สำเร็จ: {e}")
-    st.stop()
+    st.error(f"DB Error: {e}"); st.stop()
 
+# --- Layout ---
 col_L, col_R = st.columns([1, 1.5])
 
 with col_L:
@@ -261,21 +258,31 @@ with col_L:
         st.text_area("ที่อยู่", value=seller_info['a'], disabled=True, height=80)
 
     st.markdown("### 👤 ข้อมูลลูกค้า")
+    # Search Customer
     cust_list = [""] + list(cust_df['Name'].unique()) if not cust_df.empty else [""]
-    search_term = st.selectbox("🔍 ค้นหาลูกค้า (ชื่อ)", cust_list)
-    found_cust = {}
-    if search_term:
-        row = cust_df[cust_df['Name'] == search_term].iloc[0]
+    selected_cust = st.selectbox("🔍 ค้นหาลูกค้า (ชื่อ)", cust_list)
+    
+    # 🟢 Logic: เมื่อเลือกชื่อลูกค้า ให้ยัดค่าใส่ Session State ทันที
+    if selected_cust and selected_cust != st.session_state.get('last_selected_cust'):
+        row = cust_df[cust_df['Name'] == selected_cust].iloc[0]
         h, d, p = smart_clean_address(row['Address1'], row['Address2'])
-        found_cust = {"n": row['Name'], "t": str(row['TaxID']), "h": h, "d": d, "p": p, "tel": str(row['Phone'])}
-        
-    c_name = st.text_input("ชื่อลูกค้า", value=found_cust.get("n", ""))
-    c_tax = st.text_input("เลขผู้เสียภาษี", value=found_cust.get("t", ""))
-    c_h = st.text_input("ที่อยู่ (เลขที่/ถนน)", value=found_cust.get("h", ""))
+        st.session_state.form_name = row['Name']
+        st.session_state.form_tax = str(row['TaxID'])
+        st.session_state.form_h = h
+        st.session_state.form_d = d
+        st.session_state.form_p = p
+        st.session_state.form_tel = str(row['Phone'])
+        st.session_state.last_selected_cust = selected_cust
+        st.rerun()
+
+    # 🟢 Form Inputs (ผูกกับ Session State)
+    c_name = st.text_input("ชื่อลูกค้า", key="form_name")
+    c_tax = st.text_input("เลขผู้เสียภาษี", key="form_tax")
+    c_h = st.text_input("ที่อยู่ (เลขที่/ถนน)", key="form_h")
     cc1, cc2 = st.columns(2)
-    c_d = cc1.text_input("ตำบล/อำเภอ", value=found_cust.get("d", ""))
-    c_p = cc2.text_input("จังหวัด/รหัส", value=found_cust.get("p", ""))
-    c_tel = st.text_input("เบอร์โทร", value=found_cust.get("tel", ""))
+    c_d = cc1.text_input("ตำบล/อำเภอ", key="form_d")
+    c_p = cc2.text_input("จังหวัด/รหัส", key="form_p")
+    c_tel = st.text_input("เบอร์โทร", key="form_tel")
 
     st.markdown("---")
     st.markdown("### 📄 ตั้งค่าเอกสาร")
@@ -286,8 +293,6 @@ with col_L:
 
 with col_R:
     st.markdown("### 🛒 รายการสินค้า")
-    if 'cart' not in st.session_state: st.session_state.cart = []
-    
     ic1, ic2, ic3, ic4 = st.columns([3, 1, 1, 1])
     item_list = [""] + list(item_df['ItemName'].unique()) if not item_df.empty else [""]
     with ic1: sel_item = st.selectbox("เลือกสินค้า", item_list)
@@ -333,6 +338,7 @@ with col_R:
                     else: st.error(f"Backup ล้มเหลว: {res}")
     else: st.info("ยังไม่มีสินค้าในตะกร้า")
 
+# --- Sidebar: Queue Manager (Fixed Pull Logic) ---
 with st.sidebar:
     st.header("☁️ รายการรอคิว (Queue)")
     if st.button("🔄 รีเฟรชคิว"): st.rerun()
@@ -344,7 +350,21 @@ with st.sidebar:
             if not pending.empty:
                 for i, r in pending.iterrows():
                     st.warning(f"**{r['Name']}** ({r['Price']})")
+                    # 🟢 ปุ่มดึงข้อมูล: อัปเดต Session State แล้ว Rerun
                     if st.button("ดึงข้อมูล", key=f"pull_{i}"):
-                        st.info(f"Copy Tax ID: {r['TaxID']}")
+                        h, d, p = smart_clean_address(r['Address1'], r['Address2'])
+                        st.session_state.form_name = r['Name']
+                        st.session_state.form_tax = str(r['TaxID'])
+                        st.session_state.form_h = h
+                        st.session_state.form_d = d
+                        st.session_state.form_p = p
+                        st.session_state.form_tel = str(r['Phone'])
+                        
+                        # (Optional) Auto-add item to cart
+                        if r['Item']:
+                            st.session_state.cart = [{"name": r['Item'], "qty": 1, "price": float(str(r['Price']).replace(',',''))}]
+                        
+                        st.rerun() # บังคับรีเฟรชหน้าจอให้ช่องกรอกเปลี่ยนค่า
+                        
             else: st.success("ไม่มีคิวค้าง")
-    except: pass
+    except Exception as e: st.error(f"Queue Error: {e}")
