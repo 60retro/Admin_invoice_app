@@ -19,10 +19,10 @@ from googleapiclient.http import MediaIoBaseUpload
 # ==========================================
 # ⚙️ 1. ตั้งค่าระบบ
 # ==========================================
-st.set_page_config(page_title="Nami Admin V94", layout="wide", page_icon="🧾")
+st.set_page_config(page_title="Nami Admin V97", layout="wide", page_icon="🧾")
 
 ADMIN_PASSWORD = "3457"
-DRIVE_FOLDER_ID = "1zm2KN-W7jCfwYirs-nBVNTlROMyW19ur" # 🟢 แก้ ID ตรงนี้
+DRIVE_FOLDER_ID = "1zm2KN-W7jCfwYirs-nBVNTlROMyW19ur" # 🟢 แก้ ID โฟลเดอร์ตรงนี้
 SHEET_NAME = "Invoice_Data"
 
 try:
@@ -61,30 +61,14 @@ def smart_clean_address(addr1, addr2):
 def upload_to_drive(file_obj, filename):
     try:
         service = get_drive_service()
-        
-        file_metadata = {
-            'name': filename,
-            'parents': [DRIVE_FOLDER_ID]  # บอทต้องเห็นโฟลเดอร์นี้ชัวร์ๆ
-        }
-        
-        # Reset pointer
+        file_metadata = {'name': filename, 'parents': [DRIVE_FOLDER_ID]}
         file_obj.seek(0)
-        
-        # 🔴 เปลี่ยนเป็น resumable=False เพื่อเลี่ยงการเช็ค Quota ของบอท
+        # ใช้ Simple Upload เพื่อลดปัญหา Quota
         media = MediaIoBaseUpload(file_obj, mimetype='application/pdf', resumable=False)
-        
-        # เพิ่ม supportsAllDrives=True เผื่อคุณใช้ Shared Drive
-        file = service.files().create(
-            body=file_metadata,
-            media_body=media,
-            fields='id',
-            supportsAllDrives=True 
-        ).execute()
-        
+        file = service.files().create(body=file_metadata, media_body=media, fields='id', supportsAllDrives=True).execute()
         return True, file.get('id')
-        
-    except Exception as e:
-        return False, f"Upload Error: {str(e)} (กรุณาเช็ค Folder ID และการแชร์สิทธิ์อีกครั้ง)"
+    except Exception as e: return False, str(e)
+
 # ==========================================
 # 🖨️ 4. PDF Engine (V90 Logic)
 # ==========================================
@@ -213,15 +197,11 @@ def generate_pdf_v90(doc_data, items, doc_type, running_no):
 # ==========================================
 # 🖥️ 5. Init State & Load Data
 # ==========================================
-# 🟢 เริ่มต้นตัวแปร Session State (ต้องทำก่อนวาดหน้าจอ)
 if 'logged_in' not in st.session_state: st.session_state.logged_in = False
 if 'cart' not in st.session_state: st.session_state.cart = []
-# ตัวแปรฟอร์ม
-keys = ['form_name', 'form_tax', 'form_h', 'form_d', 'form_p', 'form_tel']
-for k in keys:
+for k in ['form_name', 'form_tax', 'form_h', 'form_d', 'form_p', 'form_tel']:
     if k not in st.session_state: st.session_state[k] = ""
 
-# --- Login Logic ---
 if not st.session_state.logged_in:
     col1, col2, col3 = st.columns([1,2,1])
     with col2:
@@ -252,9 +232,8 @@ except Exception as e:
     st.error(f"DB Error: {e}"); st.stop()
 
 # ==========================================
-# ⚡️ 6. Logic Processing (ต้องอยู่ก่อนวาด Layout)
+# ⚡️ 6. Logic Processing
 # ==========================================
-# 🔴 Sidebar Logic: ย้ายมาไว้ตรงนี้ เพื่อให้กดปุ่มแล้วอัปเดต State ก่อนวาดหน้าจอ
 with st.sidebar:
     st.header("☁️ รายการรอคิว (Queue)")
     if st.button("🔄 รีเฟรชคิว"): st.rerun()
@@ -266,7 +245,6 @@ with st.sidebar:
             if not pending.empty:
                 for i, r in pending.iterrows():
                     st.warning(f"**{r['Name']}** ({r['Price']})")
-                    # ✅ ปุ่มดึงข้อมูล: อัปเดต State แล้ว Rerun ทันที
                     if st.button("ดึงข้อมูล", key=f"pull_{i}"):
                         h, d, p = smart_clean_address(r['Address1'], r['Address2'])
                         st.session_state.form_name = r['Name']
@@ -275,19 +253,22 @@ with st.sidebar:
                         st.session_state.form_d = d
                         st.session_state.form_p = p
                         st.session_state.form_tel = str(r['Phone'])
-                        
-                        # Add item to cart
                         if r['Item']:
                             st.session_state.cart = [{"name": r['Item'], "qty": 1, "price": float(str(r['Price']).replace(',',''))}]
-                        
-                        st.rerun() # 🚀 บังคับรีเฟรชหน้าจอเพื่อแสดงค่าใหม่
+                        st.rerun()
             else: st.success("ไม่มีคิวค้าง")
     except Exception as e: st.error(f"Queue Error: {e}")
 
 # ==========================================
-# 🖥️ 7. Layout & Form (วาดทีหลัง Logic)
+# 🖥️ 7. Layout & Form
 # ==========================================
-st.title("🧾 Nami Invoice (V94 Web Edition)")
+st.title("🧾 Nami Invoice (V97 Always Ready)")
+
+# โชว์ Email บอท เพื่อให้ก๊อปไปแชร์สิทธิ์
+creds = get_credentials()
+if hasattr(creds, 'service_account_email'):
+    st.caption(f"🤖 Bot Email: `{creds.service_account_email}` (ใช้เมลนี้แชร์ Folder เป็น Editor)")
+
 col_L, col_R = st.columns([1, 1.5])
 
 with col_L:
@@ -300,7 +281,6 @@ with col_L:
     cust_list = [""] + list(cust_df['Name'].unique()) if not cust_df.empty else [""]
     selected_cust = st.selectbox("🔍 ค้นหาลูกค้า (ชื่อ)", cust_list)
 
-    # Search Logic: ถ้าเลือก Dropdown ให้เปลี่ยน State แล้ว Rerun
     if selected_cust and selected_cust != st.session_state.get('last_selected_cust'):
         row = cust_df[cust_df['Name'] == selected_cust].iloc[0]
         h, d, p = smart_clean_address(row['Address1'], row['Address2'])
@@ -313,7 +293,6 @@ with col_L:
         st.session_state.last_selected_cust = selected_cust
         st.rerun()
 
-    # 🟢 Text Inputs ผูกกับ Session State โดยตรง
     c_name = st.text_input("ชื่อลูกค้า", key="form_name")
     c_tax = st.text_input("เลขผู้เสียภาษี", key="form_tax")
     c_h = st.text_input("ที่อยู่ (เลขที่/ถนน)", key="form_h")
@@ -350,7 +329,10 @@ with col_R:
         st.markdown(f"### 💰 ยอดรวม: `{grand_total:,.2f}` บาท")
         st.markdown("---")
         
-        if st.button("🖨️ ออกใบกำกับภาษี & Backup Cloud", type="primary", use_container_width=True):
+        # 🟢 ปุ่ม Backup Toggle
+        use_backup = st.checkbox("Backup ลง Google Drive", value=True)
+
+        if st.button("🖨️ ออกใบกำกับภาษี (Generate PDF)", type="primary", use_container_width=True):
             if not c_name: st.error("กรุณาระบุชื่อลูกค้า")
             else:
                 with st.spinner("กำลังสร้างไฟล์..."):
@@ -361,20 +343,24 @@ with col_R:
                     }
                     pdf_buffer = generate_pdf_v90(doc_data, st.session_state.cart, doc_type, current_run)
                     fname = f"INV_{c_name}_{datetime.now().strftime('%Y%m%d_%H%M')}.pdf"
-                    ok, res = upload_to_drive(pdf_buffer, fname)
                     
-                    if ok:
-                        st.success(f"✅ บันทึกขึ้น Cloud แล้ว (ID: {res})")
-                        try:
-                            prefix = re.match(r"([A-Za-z\-]+)", current_run).group(1)
-                            num = int(re.search(r"(\d+)$", current_run).group(1)) + 1
-                            new_run = f"{prefix}{str(num).zfill(len(current_run)-len(prefix))}"
-                            cell = ws_conf.find(run_key)
-                            ws_conf.update_cell(cell.row, 2, new_run)
-                        except: pass
-                        st.download_button("⬇️ ดาวน์โหลด PDF", data=pdf_buffer, file_name=fname, mime="application/pdf")
-                    else: st.error(f"Backup ล้มเหลว: {res}")
+                    # 1. Download Button (แสดงทันที ไม่รอ Backup)
+                    st.success("✅ สร้างไฟล์เสร็จแล้ว! กดดาวน์โหลดได้เลย")
+                    st.download_button("⬇️ ดาวน์โหลด PDF", data=pdf_buffer, file_name=fname, mime="application/pdf")
+
+                    # 2. Update Running No (Sheet)
+                    try:
+                        prefix = re.match(r"([A-Za-z\-]+)", current_run).group(1)
+                        num = int(re.search(r"(\d+)$", current_run).group(1)) + 1
+                        new_run = f"{prefix}{str(num).zfill(len(current_run)-len(prefix))}"
+                        cell = ws_conf.find(run_key)
+                        ws_conf.update_cell(cell.row, 2, new_run)
+                    except: pass
+
+                    # 3. Backup to Drive (Optional & Non-Blocking)
+                    if use_backup:
+                        with st.status("กำลัง Backup ขึ้น Cloud...", expanded=True) as status:
+                            ok, res = upload_to_drive(pdf_buffer, fname)
+                            if ok: status.update(label=f"✅ Backup สำเร็จ (ID: {res})", state="complete")
+                            else: status.update(label=f"⚠️ Backup ไม่ผ่าน: {res}", state="error")
     else: st.info("ยังไม่มีสินค้าในตะกร้า")
-
-
-
