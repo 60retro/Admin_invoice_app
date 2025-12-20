@@ -21,7 +21,7 @@ import re
 # ==========================================
 st.set_page_config(page_title="Nami Admin V107", layout="wide", page_icon="🧾")
 
-ADMIN_PASSWORD = "3457"
+ADMIN_PASSWORD = "1234"
 # 🟢 ใส่ URL Webhook (Apps Script) ของคุณ
 APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbxlUwV9CaVXHBVmbvRwNCGaNanEsQyOlG8f0kc3BHAS_0X8pLp4KxZCtz_EojYBCvWl6w/exec"
 SHEET_NAME = "Invoice_Data"
@@ -129,7 +129,7 @@ def generate_pdf_v107(doc_data, items, doc_type, running_no, date_str, vat_inc, 
         for l in addr_lines:
             c.drawString(box_x + 3*mm, curr_y_addr, l)
             curr_y_addr -= 4*mm
-        c.drawString(box_x + 3*mm, curr_y_addr, f"โทร: {doc_data.get('shop_tel','')}") # (ถ้ามี)
+        # c.drawString(box_x + 3*mm, curr_y_addr, f"โทร: {doc_data.get('shop_tel','')}")
 
         # --- 3. Title ---
         title_txt = "ต้นฉบับ ใบกำกับภาษี / ใบเสร็จรับเงิน" if doc_type == "Full" else "ใบกำกับภาษีอย่างย่อ (ABB)"
@@ -223,7 +223,7 @@ def generate_pdf_v107(doc_data, items, doc_type, running_no, date_str, vat_inc, 
         # Close Table Box
         c.line(margin, curr_y, width-margin, curr_y) # Bottom line
         
-        # Fill Empty Rows
+        # Fill Empty Rows (ลากเส้นยาวลงมาถึง Footer แบบ V87)
         btm_y = top_y - 140*mm
         if curr_y > btm_y:
             c.rect(margin, btm_y, page_w, curr_y - btm_y) # Empty box
@@ -332,7 +332,7 @@ with col_L:
         c1, c2 = st.columns(2)
         st.session_state.s_n = c1.text_input("ชื่อร้าน", st.session_state.s_n)
         st.session_state.s_t = c2.text_input("Tax ID", st.session_state.s_t)
-        st.session_state.s_a = st.text_area("ที่อยู่", st.session_state.s_a, height=80)
+        st.session_state.s_a = st.text_area("ที่อยู่ (ใส่ \\n เพื่อขึ้นบรรทัดใหม่)", st.session_state.s_a, height=80)
         
         logo_up = st.file_uploader("โลโก้ (PNG/JPG)", type=['png','jpg','jpeg'])
         
@@ -362,7 +362,7 @@ with col_L:
     c1, c2 = st.columns(2)
     st.session_state.f_n = c1.text_input("ชื่อลูกค้า", st.session_state.f_n)
     st.session_state.f_t = c2.text_input("Tax ID (ลูกค้า)", st.session_state.f_t)
-    st.session_state.f_a = st.text_area("ที่อยู่ลูกค้า", st.session_state.f_a)
+    st.session_state.f_a = st.text_area("ที่อยู่ลูกค้า", st.session_state.f_a, height=68)
     st.session_state.f_tel = st.text_input("เบอร์โทร", st.session_state.f_tel)
     
     if st.button("🧹 ล้างค่า"):
