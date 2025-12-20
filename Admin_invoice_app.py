@@ -22,7 +22,7 @@ import time
 # ==========================================
 st.set_page_config(page_title="Nami Admin V106", layout="wide", page_icon="🧾")
 
-ADMIN_PASSWORD = "1234"
+ADMIN_PASSWORD = "3457"
 APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbxlUwV9CaVXHBVmbvRwNCGaNanEsQyOlG8f0kc3BHAS_0X8pLp4KxZCtz_EojYBCvWl6w/exec" # 🟢 ใส่ URL Webhook ตรงนี้
 SHEET_NAME = "Invoice_Data"
 DRIVE_FOLDER_ID = "1zm2KN-W7jCfwYirs-nBVNTlROMyW19ur" # ใส่ ID เผื่อไว้
@@ -401,3 +401,4 @@ with st.sidebar:
                     ws_q.update_cell(i+2, 10, "Done")
                     st.rerun()
         except: st.caption("No Queue / Connect Error")
+
