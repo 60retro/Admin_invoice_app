@@ -24,7 +24,7 @@ st.set_page_config(page_title="Nami Admin V100", layout="wide", page_icon="🧾"
 
 ADMIN_PASSWORD = "3457"
 # 🟢 ใส่ URL Web App ที่คุณได้มา (ที่เปิดแล้วเจอ doGet error นั่นแหละครับ ถูกแล้ว!)
-APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbx.../exec" 
+APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbxlUwV9CaVXHBVmbvRwNCGaNanEsQyOlG8f0kc3BHAS_0X8pLp4KxZCtz_EojYBCvWl6w/exec" 
 # 🟢 ใส่ ID โฟลเดอร์ (เผื่อไว้)
 DRIVE_FOLDER_ID = "1zm2KN-W7jCfwYirs-nBVNTlROMyW19ur"
 SHEET_NAME = "Invoice_Data"
@@ -321,3 +321,4 @@ with col_R:
                     st.session_state.cart = []
                     for k in ['form_name', 'form_tax', 'form_h', 'form_d', 'form_p', 'form_tel']: st.session_state[k] = ""
     else: st.info("ยังไม่มีสินค้าในตะกร้า")
+
