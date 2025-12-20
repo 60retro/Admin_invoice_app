@@ -15,17 +15,18 @@ from reportlab.lib.pagesizes import A4
 from reportlab.lib.units import mm
 from reportlab.platypus import Paragraph, Frame
 from reportlab.lib.styles import ParagraphStyle
+from reportlab.lib.utils import ImageReader # เพิ่มตัวนี้สำหรับอ่านรูป
 import re
 
 # ==========================================
 # ⚙️ 1. ตั้งค่าระบบ
 # ==========================================
-st.set_page_config(page_title="Nami Admin V100", layout="wide", page_icon="🧾")
+st.set_page_config(page_title="Nami Admin V102", layout="wide", page_icon="🧾")
 
 ADMIN_PASSWORD = "3457"
-# 🟢 ใส่ URL Web App ที่คุณได้มา (ที่เปิดแล้วเจอ doGet error นั่นแหละครับ ถูกแล้ว!)
+# 🟢 URL Web App (Web Hook)
 APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbxlUwV9CaVXHBVmbvRwNCGaNanEsQyOlG8f0kc3BHAS_0X8pLp4KxZCtz_EojYBCvWl6w/exec" 
-# 🟢 ใส่ ID โฟลเดอร์ (เผื่อไว้)
+# 🟢 ID โฟลเดอร์ Google Drive
 DRIVE_FOLDER_ID = "1zm2KN-W7jCfwYirs-nBVNTlROMyW19ur"
 SHEET_NAME = "Invoice_Data"
 
@@ -71,9 +72,9 @@ def upload_via_script(file_obj, filename):
     except Exception as e: return False, str(e)
 
 # ==========================================
-# 🖨️ 4. PDF Engine (V90 Logic)
+# 🖨️ 4. PDF Engine (V102 - Support Logo & Editable Info)
 # ==========================================
-def generate_pdf_v90(doc_data, items, doc_type, running_no):
+def generate_pdf_v102(doc_data, items, doc_type, running_no, logo_file=None):
     buffer = BytesIO(); c = canvas.Canvas(buffer, pagesize=A4); width, height = A4; half_height = height / 2
     date_str = datetime.now(pytz.timezone('Asia/Bangkok')).strftime("%d/%m/%Y")
 
@@ -91,6 +92,16 @@ def generate_pdf_v90(doc_data, items, doc_type, running_no):
         margin = 15 * mm; base_y = y_offset; top_y = base_y + half_height - margin
         page_w = width - (2 * margin); font_std = 11; font_bold = 12; line_h = 12
         
+        # --- Header (Logo) ---
+        logo_w = 20 * mm; logo_h = 20 * mm # ขนาดโลโก้เริ่มต้น
+        if logo_file:
+            try:
+                img = ImageReader(logo_file)
+                # วาดโลโก้มุมซ้ายบน
+                c.drawImage(img, margin, top_y - 10, width=logo_w, height=logo_h, preserveAspectRatio=True, mask='auto')
+            except: pass
+
+        # Shop Box
         box_w = 260; box_h = 80; box_x = width - margin - box_w; box_y = top_y - box_h + 10
         c.setLineWidth(1); c.roundRect(box_x, box_y, box_w, box_h, 8, stroke=1, fill=0)
         c.setFont(FONT_NAME, font_bold); c.drawString(box_x + 10, box_y + box_h - 15, doc_data['shop_name'])
@@ -107,6 +118,8 @@ def generate_pdf_v90(doc_data, items, doc_type, running_no):
         c.drawString(margin, bar_y, f"เลขประจำตัวผู้เสียภาษีอากร : {doc_data['shop_tax']}")
         c.drawRightString(width - margin, bar_y, f"เลขที่ : {running_no}")
 
+        # ... (ส่วน Customer Box, Table, Footer เหมือนเดิม) ...
+        # (เพื่อให้โค้ดไม่ยาวเกินไป ผมใช้ Logic V100 เป๊ะๆ ในส่วนนี้ครับ)
         info_box_y = bar_y - 5; info_box_h = 75; info_box_btm = info_box_y - info_box_h
         c.rect(margin, info_box_btm, page_w, info_box_h); div_x = width - margin - 200; c.line(div_x, info_box_y, div_x, info_box_btm)
         cx = margin + 10; cy = info_box_y - 12; label_anchor = cx + 110
@@ -161,11 +174,12 @@ def generate_pdf_v90(doc_data, items, doc_type, running_no):
     c.save(); buffer.seek(0); return buffer
 
 # ==========================================
-# 🖥️ 5. Init State & Load Data
+# 🖥️ 5. Init State
 # ==========================================
 if 'logged_in' not in st.session_state: st.session_state.logged_in = False
 if 'cart' not in st.session_state: st.session_state.cart = []
 if 'queue_idx' not in st.session_state: st.session_state.queue_idx = None
+# ตัวแปรฟอร์มลูกค้า
 for k in ['form_name', 'form_tax', 'form_h', 'form_d', 'form_p', 'form_tel']:
     if k not in st.session_state: st.session_state[k] = ""
 
@@ -179,13 +193,19 @@ if not st.session_state.logged_in:
             else: st.error("รหัสผ่านไม่ถูกต้อง")
     st.stop()
 
+# Load Data
 try:
     client = get_sheet_client(); sh = client.open(SHEET_NAME)
     ws_conf = sh.worksheet("Config"); raw_conf = ws_conf.get_all_values()
     conf_data = {}
     for row in raw_conf:
         if len(row) >= 2: conf_data[str(row[0]).strip()] = str(row[1]).strip()
-    seller_info = {"n": conf_data.get("ShopName", "Nami"), "t": conf_data.get("TaxID", ""), "a": conf_data.get("Address", "")}
+    
+    # 🟢 โหลดข้อมูลร้านลง Session State (ถ้ายังไม่มี) เพื่อให้แก้ได้
+    if 'shop_n' not in st.session_state: st.session_state.shop_n = conf_data.get("ShopName", "Nami")
+    if 'shop_t' not in st.session_state: st.session_state.shop_t = conf_data.get("TaxID", "")
+    if 'shop_a' not in st.session_state: st.session_state.shop_a = conf_data.get("Address", "")
+
     try: cust_df = pd.DataFrame(sh.worksheet("Customers").get_all_records())
     except: cust_df = pd.DataFrame(columns=['Name'])
     try: item_df = pd.DataFrame(sh.worksheet("Items").get_all_records())
@@ -193,7 +213,7 @@ try:
 except Exception as e: st.error(f"DB Error: {e}"); st.stop()
 
 # ==========================================
-# ⚡️ 6. Logic Processing
+# ⚡️ 6. Logic Processing (Sidebar)
 # ==========================================
 with st.sidebar:
     st.header("☁️ รายการรอคิว (Queue)")
@@ -222,15 +242,18 @@ with st.sidebar:
 # ==========================================
 # 🖥️ 7. Layout & Form
 # ==========================================
-st.title("🧾 Nami Invoice (V100 Real Final)")
+st.title("🧾 Nami Invoice (V102 Freedom Edition)")
 col_L, col_R = st.columns([1, 1.5])
 
 with col_L:
-    with st.expander("🔒 ข้อมูลผู้ขาย (Admin)", expanded=False):
-        st.text_input("ชื่อร้าน", value=seller_info['n'], disabled=True)
-        st.text_input("Tax ID", value=seller_info['t'], disabled=True)
-        st.text_area("ที่อยู่", value=seller_info['a'], disabled=True, height=80)
+    # 🟢 1. ข้อมูลผู้ขาย (แก้ไขได้ + โลโก้)
+    with st.expander("📝 แก้ไขข้อมูลร้าน / โลโก้", expanded=True):
+        st.session_state.shop_n = st.text_input("ชื่อร้าน", value=st.session_state.shop_n)
+        st.session_state.shop_t = st.text_input("Tax ID", value=st.session_state.shop_t)
+        st.session_state.shop_a = st.text_area("ที่อยู่", value=st.session_state.shop_a, height=80)
+        uploaded_logo = st.file_uploader("อัปโหลดโลโก้ (PNG/JPG)", type=['png', 'jpg', 'jpeg'])
 
+    # 🟢 2. ข้อมูลลูกค้า
     st.markdown("### 👤 ข้อมูลลูกค้า")
     cust_list = [""] + list(cust_df['Name'].unique()) if not cust_df.empty else [""]
     selected_cust = st.selectbox("🔍 ค้นหาลูกค้า (ชื่อ)", cust_list)
@@ -250,11 +273,17 @@ with col_L:
     c_p = cc2.text_input("จังหวัด/รหัส", key="form_p")
     c_tel = st.text_input("เบอร์โทร", key="form_tel")
 
-    st.markdown("---"); st.markdown("### 📄 ตั้งค่าเอกสาร")
+    st.markdown("---")
+    # 🟢 3. ตั้งค่าเอกสาร (แก้ไขเลขได้เอง)
+    st.markdown("### 📄 เลขที่เอกสาร (แก้ไขได้)")
     doc_type = st.radio("ประเภท", ["Full", "ABB"], horizontal=True)
+    
+    # Logic อ่านค่าล่าสุด
     run_key = "Full_No" if doc_type == "Full" else "Abb_No"
-    current_run = conf_data.get(run_key, "00000000000")
-    st.info(f"เลขที่เอกสารปัจจุบัน: **{current_run}**")
+    default_run = conf_data.get(run_key, "INV-000")
+    
+    # สร้าง Input ให้แก้เลขเองได้เลย
+    manual_run_no = st.text_input("เลขที่ปัจจุบัน (พิมพ์แก้ได้เลย)", value=default_run)
 
 with col_R:
     st.markdown("### 🛒 รายการสินค้า")
@@ -282,38 +311,54 @@ with col_R:
             if not c_name: st.error("กรุณาระบุชื่อลูกค้า")
             else:
                 with st.spinner("กำลังบันทึกข้อมูล..."):
-                    # 🔴 1. Update Sheets FIRST (เพื่อความชัวร์เรื่องข้อมูล)
+                    # 🔴 1. Update Sheets & Config
                     try:
-                        # Update Config (Running No)
-                        prefix = re.match(r"([A-Za-z\-]+)", current_run).group(1)
-                        num = int(re.search(r"(\d+)$", current_run).group(1)) + 1
-                        new_run = f"{prefix}{str(num).zfill(len(current_run)-len(prefix))}"
-                        cell = ws_conf.find(run_key); ws_conf.update_cell(cell.row, 2, new_run)
-                        
-                        # Update Sales Log (New Sheet) - แค่วันที่ กับ ยอดเงิน
+                        # บันทึกข้อมูลร้านล่าสุดกลับไป (จะได้ไม่ต้องแก้บ่อยๆ)
+                        ws_conf.update_cell(ws_conf.find("ShopName").row, 2, st.session_state.shop_n)
+                        ws_conf.update_cell(ws_conf.find("TaxID").row, 2, st.session_state.shop_t)
+                        ws_conf.update_cell(ws_conf.find("Address").row, 2, st.session_state.shop_a)
+
+                        # บันทึกเลขที่รันถัดไป (Auto Increment จากเลขที่กรอกมา)
                         try:
-                            ws_log = sh.worksheet("SalesLog")
-                            ws_log.append_row([datetime.now().strftime("%Y-%m-%d %H:%M:%S"), grand_total])
+                            # พยายามแกะเลขท้าย แล้ว +1
+                            prefix = re.match(r"([A-Za-z0-9\-]+?)(\d+)$", manual_run_no)
+                            if prefix:
+                                p, n = prefix.groups()
+                                next_run = f"{p}{str(int(n)+1).zfill(len(n))}"
+                            else:
+                                next_run = manual_run_no # ถ้าแกะไม่ออก ก็ไม่เปลี่ยน
+                            
+                            ws_conf.update_cell(ws_conf.find(run_key).row, 2, next_run)
                         except: pass
 
-                        # Update Queue Status (ถ้ามาจากคิว)
-                        if st.session_state.queue_idx:
-                            ws_q.update_cell(st.session_state.queue_idx, 10, "Done") # Col 10 = Status
-                            st.session_state.queue_idx = None # Clear
-                    except Exception as e: st.error(f"Sheet Update Error: {e}")
+                        # SalesLog
+                        try: ws_log = sh.worksheet("SalesLog"); ws_log.append_row([datetime.now().strftime("%Y-%m-%d %H:%M:%S"), grand_total])
+                        except: pass
 
-                    # 2. Generate PDF
-                    doc_data = {"shop_name": seller_info['n'], "shop_tax": seller_info['t'], "shop_addr": seller_info['a'], "cust_name": c_name, "cust_tax": c_tax, "cust_tel": c_tel, "cust_addr": f"{c_h} {c_d} {c_p}".strip()}
-                    pdf_buffer = generate_pdf_v90(doc_data, st.session_state.cart, doc_type, current_run)
+                        # Queue
+                        if st.session_state.queue_idx:
+                            ws_q.update_cell(st.session_state.queue_idx, 10, "Done") 
+                            st.session_state.queue_idx = None
+                    except Exception as e: st.error(f"Sheet Update Warning: {e}")
+
+                    # 2. Generate PDF (ใช้ค่าจาก Input ทั้งหมด)
+                    doc_data = {
+                        "shop_name": st.session_state.shop_n, 
+                        "shop_tax": st.session_state.shop_t, 
+                        "shop_addr": st.session_state.shop_a,
+                        "cust_name": c_name, "cust_tax": c_tax, "cust_tel": c_tel, 
+                        "cust_addr": f"{c_h} {c_d} {c_p}".strip()
+                    }
+                    # ส่งรูปโลโก้ (ถ้ามี) ไปด้วย
+                    pdf_buffer = generate_pdf_v102(doc_data, st.session_state.cart, doc_type, manual_run_no, uploaded_logo)
                     fname = f"INV_{c_name}_{datetime.now().strftime('%Y%m%d_%H%M')}.pdf"
                     
-                    # 3. Backup to Drive (Optional)
+                    # 3. Backup
                     backup_msg = ""
                     if use_backup:
                         ok, res = upload_via_script(pdf_buffer, fname)
                         backup_msg = f"✅ Backup สำเร็จ" if ok else f"⚠️ Backup ไม่ผ่าน: {res}"
                     
-                    # 4. Success UI
                     st.success(f"✅ บันทึกยอดขายแล้ว! {backup_msg}")
                     st.download_button("⬇️ ดาวน์โหลด PDF", data=pdf_buffer, file_name=fname, mime="application/pdf")
                     
@@ -321,5 +366,3 @@ with col_R:
                     st.session_state.cart = []
                     for k in ['form_name', 'form_tax', 'form_h', 'form_d', 'form_p', 'form_tel']: st.session_state[k] = ""
     else: st.info("ยังไม่มีสินค้าในตะกร้า")
-
-
