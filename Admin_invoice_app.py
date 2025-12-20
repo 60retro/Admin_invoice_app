@@ -253,7 +253,7 @@ with col_L:
     st.markdown("---"); st.markdown("### 📄 ตั้งค่าเอกสาร")
     doc_type = st.radio("ประเภท", ["Full", "ABB"], horizontal=True)
     run_key = "Full_No" if doc_type == "Full" else "Abb_No"
-    current_run = conf_data.get(run_key, "INV-000")
+    current_run = conf_data.get(run_key, "00000000000")
     st.info(f"เลขที่เอกสารปัจจุบัน: **{current_run}**")
 
 with col_R:
@@ -321,4 +321,5 @@ with col_R:
                     st.session_state.cart = []
                     for k in ['form_name', 'form_tax', 'form_h', 'form_d', 'form_p', 'form_tel']: st.session_state[k] = ""
     else: st.info("ยังไม่มีสินค้าในตะกร้า")
+
 
