@@ -15,26 +15,31 @@ from reportlab.lib.pagesizes import A4
 from reportlab.lib.units import mm
 from reportlab.lib.utils import ImageReader
 import re
-import time
 
 # ==========================================
-# ⚙️ 1. Config
+# ⚙️ 1. Config & Setup
 # ==========================================
-st.set_page_config(page_title="Nami Admin V106", layout="wide", page_icon="🧾")
+st.set_page_config(page_title="Nami Admin V107", layout="wide", page_icon="🧾")
 
 ADMIN_PASSWORD = "3457"
-APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbxlUwV9CaVXHBVmbvRwNCGaNanEsQyOlG8f0kc3BHAS_0X8pLp4KxZCtz_EojYBCvWl6w/exec" # 🟢 ใส่ URL Webhook ตรงนี้
+# 🟢 ใส่ URL Webhook (Apps Script) ของคุณ
+APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbxlUwV9CaVXHBVmbvRwNCGaNanEsQyOlG8f0kc3BHAS_0X8pLp4KxZCtz_EojYBCvWl6w/exec"
 SHEET_NAME = "Invoice_Data"
-DRIVE_FOLDER_ID = "1zm2KN-W7jCfwYirs-nBVNTlROMyW19ur" # ใส่ ID เผื่อไว้
+DRIVE_FOLDER_ID = "1zm2KN-W7jCfwYirs-nBVNTlROMyW19ur"
 
+# Load Font (พยายามโหลดฟอนต์ไทย)
 try:
     pdfmetrics.registerFont(TTFont('CustomFont', 'THSarabunNewBold.ttf'))
     FONT_NAME = 'CustomFont'
+    FONT_SIZE_STD = 12
+    FONT_SIZE_BOLD = 14
 except:
     FONT_NAME = 'Helvetica'
+    FONT_SIZE_STD = 10
+    FONT_SIZE_BOLD = 12
 
 # ==========================================
-# 🔌 2. Auth & Connection (Hybrid Core)
+# 🔌 2. Google Services (Hybrid Core)
 # ==========================================
 @st.cache_resource
 def get_client():
@@ -45,45 +50,36 @@ def get_client():
         creds = ServiceAccountCredentials.from_json_keyfile_name("credentials.json", scope)
     return gspread.authorize(creds)
 
-# ฟังก์ชันอ่านข้อมูลแบบ Safe Mode (ป้องกัน Error ข้อมูลแหว่ง)
-def load_data_safe():
+# Cache ข้อมูลสินค้า/ลูกค้า (5 นาที) เพื่อความเร็วและลด Quota
+@st.cache_data(ttl=300)
+def load_db_cache():
     try:
-        client = get_client()
-        sh = client.open(SHEET_NAME)
-        
-        # 1. Config: อ่านแบบ Dict (Key:Value)
-        ws_conf = sh.worksheet("Config")
-        raw_conf = ws_conf.get_all_values()
-        conf = {}
-        for r in raw_conf:
-            if len(r) >= 2: conf[str(r[0]).strip()] = str(r[1]).strip()
-            
-        # 2. Customers
-        try: 
-            cust_recs = sh.worksheet("Customers").get_all_records()
-            cust_df = pd.DataFrame(cust_recs)
-        except: cust_df = pd.DataFrame(columns=["Name"])
-            
-        # 3. Items
-        try: 
-            item_recs = sh.worksheet("Items").get_all_records()
-            item_df = pd.DataFrame(item_recs)
-        except: item_df = pd.DataFrame(columns=["ItemName"])
-            
-        # 4. Queue (Live)
-        try: ws_q = sh.worksheet("Queue")
-        except: ws_q = None
-            
-        return sh, conf, cust_df, item_df, ws_q
-        
-    except Exception as e:
-        st.error(f"โหลดข้อมูลไม่สำเร็จ: {e}")
-        return None, {}, pd.DataFrame(), pd.DataFrame(), None
+        client = get_client(); sh = client.open(SHEET_NAME)
+        # Items
+        try: items = pd.DataFrame(sh.worksheet("Items").get_all_records())
+        except: items = pd.DataFrame(columns=["ItemName"])
+        # Customers
+        try: custs = pd.DataFrame(sh.worksheet("Customers").get_all_records())
+        except: custs = pd.DataFrame(columns=["Name"])
+        return items, custs
+    except: return pd.DataFrame(), pd.DataFrame()
+
+def upload_via_webhook(pdf_bytes, filename):
+    try:
+        payload = {
+            "filename": filename,
+            "mimeType": "application/pdf",
+            "file": base64.b64encode(pdf_bytes).decode('utf-8'),
+            "folderId": DRIVE_FOLDER_ID
+        }
+        resp = requests.post(APPS_SCRIPT_URL, json=payload)
+        return resp.json().get("status") == "success"
+    except: return False
 
 # ==========================================
-# 🖨️ 3. PDF Generator (Logo + Format V87)
+# 🖨️ 3. PDF Generator (V87 Desktop Logic - Exact Replica)
 # ==========================================
-def generate_pdf_v106(doc_data, items, doc_type, running_no, date_str, vat_inc, logo_upload):
+def generate_pdf_v107(doc_data, items, doc_type, running_no, date_str, vat_inc, logo_upload):
     buffer = BytesIO()
     c = canvas.Canvas(buffer, pagesize=A4)
     width, height = A4; half_height = height / 2
@@ -99,171 +95,260 @@ def generate_pdf_v106(doc_data, items, doc_type, running_no, date_str, vat_inc, 
         return lines
 
     def draw_content(y_base):
-        margin = 15 * mm; top_y = y_base + half_height - margin
+        margin = 15 * mm
+        top_y = y_base + half_height - margin
+        page_w = width - (2 * margin)
         
-        # --- Logo ---
+        # --- 1. Header & Logo ---
+        logo_h = 20 * mm
         if logo_upload:
             try:
                 logo_upload.seek(0)
                 img = ImageReader(logo_upload)
-                c.drawImage(img, margin, top_y - 10, width=25*mm, height=25*mm, preserveAspectRatio=True, mask='auto')
+                # วาดโลโก้ (ซ้ายบน)
+                c.drawImage(img, margin, top_y - 10, width=30*mm, height=logo_h, preserveAspectRatio=True, mask='auto')
             except: pass
 
-        # --- Shop Info ---
-        box_x = width - margin - 260
-        c.setFont(FONT_NAME, 14)
-        c.drawString(box_x, top_y + 10, doc_data['shop_name'])
-        c.setFont(FONT_NAME, 10)
-        # Wrap Shop Address
-        addr_lines = wrap_text(doc_data['shop_addr'], 250, FONT_NAME, 10)
-        curr_y_shop = top_y - 5
+        # --- 2. Shop Box (กรอบสี่เหลี่ยมมน ขวาบน) ---
+        box_w = 90 * mm
+        box_h = 25 * mm
+        box_x = width - margin - box_w
+        box_y = top_y - 5
+        
+        c.setLineWidth(1)
+        c.roundRect(box_x, box_y, box_w, box_h, 8, stroke=1, fill=0) # กรอบมน
+        
+        # Shop Name
+        c.setFont(FONT_NAME, FONT_SIZE_BOLD)
+        c.drawString(box_x + 3*mm, box_y + box_h - 6*mm, doc_data['shop_name'])
+        
+        # Shop Address (Wrap)
+        c.setFont(FONT_NAME, FONT_SIZE_STD - 2)
+        addr_lines = wrap_text(doc_data['shop_addr'], box_w - 6*mm, FONT_NAME, FONT_SIZE_STD - 2)
+        curr_y_addr = box_y + box_h - 11*mm
         for l in addr_lines:
-            c.drawString(box_x, curr_y_shop, l)
-            curr_y_shop -= 10
-        c.drawString(box_x, curr_y_shop, f"Tax ID: {doc_data['shop_tax']}")
+            c.drawString(box_x + 3*mm, curr_y_addr, l)
+            curr_y_addr -= 4*mm
+        c.drawString(box_x + 3*mm, curr_y_addr, f"โทร: {doc_data.get('shop_tel','')}") # (ถ้ามี)
 
-        # --- Title ---
-        title = "ใบกำกับภาษี / ใบเสร็จรับเงิน" if doc_type == "Full" else "ใบกำกับภาษีอย่างย่อ (ABB)"
-        c.setFont(FONT_NAME, 18)
-        c.drawCentredString(width/2, top_y - 25, f"ต้นฉบับ {title}")
-
-        # --- Customer Info ---
-        c.setFont(FONT_NAME, 12)
-        info_y = top_y - 50
-        c.drawString(margin, info_y, f"ลูกค้า: {doc_data['cust_name']}")
-        c.drawString(margin, info_y - 15, f"Tax ID: {doc_data['cust_tax']}")
-        c.drawString(margin, info_y - 30, f"โทร: {doc_data['cust_tel']}")
+        # --- 3. Title ---
+        title_txt = "ต้นฉบับ ใบกำกับภาษี / ใบเสร็จรับเงิน" if doc_type == "Full" else "ใบกำกับภาษีอย่างย่อ (ABB)"
+        c.setFont(FONT_NAME, FONT_SIZE_BOLD + 4)
+        c.drawCentredString(width/2, top_y - 25*mm, title_txt)
         
-        # Address Wrap
-        c.drawString(margin, info_y - 45, "ที่อยู่:")
-        cust_addr_lines = wrap_text(doc_data['cust_addr'], 300, FONT_NAME, 12)
-        ay = info_y - 45
-        for l in cust_addr_lines:
-            c.drawString(margin + 30, ay, l)
-            ay -= 12
+        # --- 4. Info Bar (TaxID & No) ---
+        bar_y = top_y - 35*mm
+        c.setFont(FONT_NAME, FONT_SIZE_STD)
+        c.drawString(margin, bar_y, f"เลขประจำตัวผู้เสียภาษีอากร : {doc_data['shop_tax']}")
+        c.drawRightString(width - margin, bar_y, f"เลขที่ : {running_no}")
 
-        # --- Doc Info (Right) ---
-        c.drawRightString(width - margin, info_y, f"เลขที่: {running_no}")
-        c.drawRightString(width - margin, info_y - 15, f"วันที่: {date_str}")
-
-        # --- Table ---
-        tbl_top = ay - 20
-        c.line(margin, tbl_top, width-margin, tbl_top)
-        c.drawString(margin, tbl_top - 15, "รายการสินค้า")
-        c.drawRightString(width-margin, tbl_top - 15, "จำนวนเงิน")
-        c.line(margin, tbl_top - 20, width-margin, tbl_top - 20)
+        # --- 5. Customer & Doc Info Box (กรอบใหญ่แบ่งครึ่ง) ---
+        info_box_y = bar_y - 2*mm
+        info_box_h = 28 * mm
+        info_box_btm = info_box_y - info_box_h
         
-        curr_y = tbl_top - 35
+        c.rect(margin, info_box_btm, page_w, info_box_h) # กรอบใหญ่
+        div_x = width - margin - 70*mm # เส้นแบ่งแนวตั้ง
+        c.line(div_x, info_box_y, div_x, info_box_btm)
+        
+        # >> Left Side (Customer)
+        cx = margin + 2*mm
+        cy = info_box_y - 5*mm
+        c.drawString(cx, cy, f"เลขประจำตัวผู้เสียภาษีอากร : {doc_data['cust_tax']}")
+        cy -= 5*mm
+        c.drawString(cx, cy, f"ชื่อลูกค้า : {doc_data['cust_name']}")
+        cy -= 5*mm
+        c.drawString(cx, cy, f"ที่อยู่ :")
+        # Wrap Customer Addr
+        cust_addr_lines = wrap_text(doc_data['cust_addr'], (div_x - cx) - 5*mm, FONT_NAME, FONT_SIZE_STD)
+        ay = cy
+        for l in cust_addr_lines[:2]: # Limit 2 lines
+            c.drawString(cx + 10*mm, ay, l)
+            ay -= 5*mm
+        c.drawString(cx, info_box_btm + 2*mm, f"โทรศัพท์ : {doc_data['cust_tel']}")
+
+        # >> Right Side (Doc Details)
+        dx = div_x + 3*mm
+        dy = info_box_y - 5*mm
+        c.drawString(dx, dy, f"วันที่เอกสาร : {date_str}")
+        c.drawString(dx, dy - 5*mm, "พนักงานขาย : -")
+        c.drawString(dx, dy - 10*mm, "เงื่อนไขการชำระ : สด")
+
+        # --- 6. Items Table ---
+        tbl_top = info_box_btm - 2*mm
+        tbl_header_h = 8*mm
+        
+        # Header Box
+        c.setFillColorRGB(0.9, 0.9, 0.9)
+        c.rect(margin, tbl_top - tbl_header_h, page_w, tbl_header_h, fill=1, stroke=1)
+        c.setFillColorRGB(0, 0, 0)
+        
+        # Columns: No, Item, Qty, Price, Total
+        cols = [10*mm, 90*mm, 20*mm, 30*mm, 30*mm]
+        col_x = [margin]
+        for w_col in cols: col_x.append(col_x[-1] + w_col)
+        
+        # Header Text
+        headers = ["ลำดับ", "รายการสินค้า", "จำนวน", "ราคาต่อหน่วย", "จำนวนเงิน"]
+        c.setFont(FONT_NAME, FONT_SIZE_BOLD)
+        for i, h in enumerate(headers):
+            c.drawCentredString(col_x[i] + cols[i]/2, tbl_top - 6*mm, h)
+            
+        # Items Content
+        curr_y = tbl_top - tbl_header_h
+        c.setFont(FONT_NAME, FONT_SIZE_STD)
         total = 0
-        for item in items:
-            name = item['name']; qty = item['qty']; price = item['price']
-            amount = qty * price; total += amount
-            c.drawString(margin, curr_y, f"{name} ({qty:,.0f} x {price:,.2f})")
-            c.drawRightString(width-margin, curr_y, f"{amount:,.2f}")
-            curr_y -= 15
         
-        c.line(margin, curr_y, width-margin, curr_y)
+        for idx, item in enumerate(items, 1):
+            if idx > 12: break # Limit items per page
+            nm = item['name']; qty = item['qty']; price = item['price']
+            amt = qty * price; total += amt
+            
+            row_h = 8*mm
+            text_y = curr_y - 6*mm
+            
+            # Draw Cells
+            c.drawCentredString(col_x[0] + cols[0]/2, text_y, str(idx))
+            c.drawString(col_x[1] + 2*mm, text_y, str(nm))
+            c.drawRightString(col_x[2] + cols[2] - 2*mm, text_y, f"{qty:,.0f}")
+            c.drawRightString(col_x[3] + cols[3] - 2*mm, text_y, f"{price:,.2f}")
+            c.drawRightString(col_x[4] + cols[4] - 2*mm, text_y, f"{amt:,.2f}")
+            
+            # Vertical Lines
+            for x in col_x: c.line(x, curr_y, x, curr_y - row_h)
+            c.line(col_x[-1], curr_y, col_x[-1], curr_y - row_h) # Last line
+            
+            curr_y -= row_h
+            
+        # Close Table Box
+        c.line(margin, curr_y, width-margin, curr_y) # Bottom line
         
+        # Fill Empty Rows
+        btm_y = top_y - 140*mm
+        if curr_y > btm_y:
+            c.rect(margin, btm_y, page_w, curr_y - btm_y) # Empty box
+            for x in col_x[1:-1]: # Vertical lines for empty space
+                c.line(x, curr_y, x, btm_y)
+            curr_y = btm_y
+
+        # --- 7. Footer (Totals) ---
         # VAT Logic
         if vat_inc:
-            grand = total
-            pre_vat = total * 100 / 107
-            vat = total - pre_vat
+            grand = total; pre_vat = total * 100 / 107; vat = total - pre_vat
         else:
-            pre_vat = total
-            vat = total * 0.07
-            grand = total + vat
+            pre_vat = total; vat = total * 0.07; grand = total + vat
+            
+        ft_h = 7*mm
+        labels = ["รวมเงิน", "ส่วนลด", "ราคาสินค้า/บริการ", "ภาษีมูลค่าเพิ่ม 7%", "จำนวนเงินรวมทั้งสิ้น"]
+        values = [f"{total:,.2f}", "-", f"{pre_vat:,.2f}", f"{vat:,.2f}", f"{grand:,.2f}"]
+        
+        # Draw Footer Rows
+        c.setFont(FONT_NAME, FONT_SIZE_STD)
+        for i in range(5):
+            c.rect(col_x[3], curr_y - ft_h, cols[3], ft_h) # Label Box
+            c.rect(col_x[4], curr_y - ft_h, cols[4], ft_h) # Value Box
+            
+            c.drawRightString(col_x[4] - 2*mm, curr_y - 5*mm, labels[i])
+            c.drawRightString(col_x[5] - 2*mm, curr_y - 5*mm, values[i])
+            curr_y -= ft_h
 
-        c.setFont(FONT_NAME, 12)
-        c.drawRightString(width-margin, curr_y - 20, f"รวมสุทธิ: {grand:,.2f}")
-        c.setFont(FONT_NAME, 10)
-        c.drawRightString(width-margin, curr_y - 35, f"(สินค้า {pre_vat:,.2f} + VAT {vat:,.2f})")
+        # Signatures
+        sig_y = curr_y - 15*mm
+        c.drawString(margin + 10*mm, sig_y, "ผู้รับสินค้า ...........................................................")
+        c.drawString(width - margin - 60*mm, sig_y, "ผู้รับเงิน ...........................................................")
 
     if doc_type == "ABB": draw_content(half_height)
     else: 
         draw_content(half_height)
-        c.setDash(3, 3); c.line(10, half_height, width-10, half_height); c.setDash(1, 0)
+        c.setDash(3, 3); c.line(5*mm, half_height, width-5*mm, half_height); c.setDash(1, 0)
         draw_content(0)
     
     c.save(); buffer.seek(0); return buffer
 
 # ==========================================
-# 🖥️ 4. State & Login
+# 🖥️ 4. State & Logic
 # ==========================================
 if 'logged_in' not in st.session_state: st.session_state.logged_in = False
 if 'cart' not in st.session_state: st.session_state.cart = []
-# ตัวแปรฟอร์ม
 for k in ['f_n','f_t','f_a','f_tel', 's_n','s_t','s_a']:
     if k not in st.session_state: st.session_state[k] = ""
 
-# --- Sidebar Login/Logout ---
+# --- Sidebar: Sync & Login ---
 with st.sidebar:
-    if st.session_state.logged_in:
-        if st.button("🚪 Logout"):
-            st.session_state.logged_in = False
-            st.rerun()
-    else:
-        st.header("Login")
-        pwd = st.text_input("Password", type="password")
-        if st.button("Login"):
+    st.title("Admin Menu")
+    
+    # 🟢 Sync Button (The God Button)
+    if st.button("🔄 Sync DB (โหลดข้อมูลใหม่)", type="primary"):
+        st.cache_data.clear() # ล้าง Cache
+        st.rerun() # รีโหลดหน้า
+    
+    st.divider()
+    
+    if not st.session_state.logged_in:
+        pwd = st.text_input("รหัสผ่าน", type="password")
+        if st.button("เข้าสู่ระบบ"):
             if pwd == ADMIN_PASSWORD:
                 st.session_state.logged_in = True
                 st.rerun()
-            else: st.error("ผิดครับ")
-        st.stop() # หยุดการทำงานถ้ายังไม่ Login
+            else: st.error("รหัสผ่านผิด")
+    else:
+        st.success("✅ เข้าสู่ระบบแล้ว")
+        if st.button("ออกจากระบบ"):
+            st.session_state.logged_in = False
+            st.rerun()
 
-# โหลดข้อมูล (หลังจาก Login ผ่านแล้ว)
-sh, conf, cust_df, item_df, ws_q = load_data_safe()
+# Stop if not logged in
+if not st.session_state.logged_in: st.stop()
 
-# Sync ข้อมูลร้านเข้า State ครั้งแรก
-if not st.session_state.s_n and conf:
-    st.session_state.s_n = conf.get("ShopName", "")
-    st.session_state.s_t = conf.get("TaxID", "")
-    st.session_state.s_a = conf.get("Address", "")
+# Load Data (After Login)
+item_df, cust_df = load_db_cache()
+
+# Load Config (Real-time)
+try:
+    client = get_client(); sh = client.open(SHEET_NAME)
+    ws_conf = sh.worksheet("Config")
+    conf_list = ws_conf.get_all_values()
+    conf = {str(r[0]): str(r[1]) for r in conf_list if len(r)>=2}
+    
+    # Init Shop Info (ถ้ายังไม่มีใน State)
+    if not st.session_state.s_n:
+        st.session_state.s_n = conf.get("ShopName","")
+        st.session_state.s_t = conf.get("TaxID","")
+        st.session_state.s_a = conf.get("Address","")
+except:
+    st.error("เชื่อมต่อ Database ไม่ได้ (ลองกด Sync DB)")
+    st.stop()
 
 # ==========================================
 # 🖥️ 5. UI Layout
 # ==========================================
-st.title("🧾 Nami Invoice (V106 Hybrid Master)")
+st.title("🧾 Nami Invoice (V107 Clone)")
 
-# --- 1. ข้อมูลผู้ขาย (Editable + Save + Logo) ---
-with st.expander("🏠 ข้อมูลร้านค้า & โลโก้ (แก้ไขได้)", expanded=True):
-    col_s1, col_s2 = st.columns([2, 1])
-    with col_s1:
-        st.session_state.s_n = st.text_input("ชื่อร้าน", st.session_state.s_n)
-        st.session_state.s_t = st.text_input("Tax ID", st.session_state.s_t)
-        st.session_state.s_a = st.text_area("ที่อยู่ (ใส่ \\n เพื่อขึ้นบรรทัดใหม่)", st.session_state.s_a, height=100)
+col_L, col_R = st.columns([1.2, 1])
+
+with col_L:
+    # --- 1. Shop Info & Logo ---
+    with st.expander("🏠 ข้อมูลร้าน & โลโก้", expanded=True):
+        c1, c2 = st.columns(2)
+        st.session_state.s_n = c1.text_input("ชื่อร้าน", st.session_state.s_n)
+        st.session_state.s_t = c2.text_input("Tax ID", st.session_state.s_t)
+        st.session_state.s_a = st.text_area("ที่อยู่", st.session_state.s_a, height=80)
         
-        if st.button("💾 บันทึกข้อมูลร้านลง Cloud"):
+        logo_up = st.file_uploader("โลโก้ (PNG/JPG)", type=['png','jpg','jpeg'])
+        
+        if st.button("บันทึกข้อมูลร้าน"):
             try:
-                # ใช้วิธีค้นหา Cell แบบบ้านๆ แต่มั่นคง
-                ws_c = sh.worksheet("Config")
-                cells = ws_c.findall("ShopName")
-                if cells: ws_c.update_cell(cells[0].row, 2, st.session_state.s_n)
-                
-                cells = ws_c.findall("TaxID")
-                if cells: ws_c.update_cell(cells[0].row, 2, st.session_state.s_t)
-                
-                cells = ws_c.findall("Address")
-                if cells: ws_c.update_cell(cells[0].row, 2, st.session_state.s_a)
-                
-                st.success("บันทึกข้อมูลร้านเรียบร้อย!")
-            except Exception as e:
-                st.error(f"บันทึกไม่ได้: {e}")
+                # Update by finding cells
+                cell = ws_conf.find("ShopName"); ws_conf.update_cell(cell.row, 2, st.session_state.s_n)
+                cell = ws_conf.find("TaxID"); ws_conf.update_cell(cell.row, 2, st.session_state.s_t)
+                cell = ws_conf.find("Address"); ws_conf.update_cell(cell.row, 2, st.session_state.s_a)
+                st.success("บันทึกแล้ว!")
+            except: st.error("บันทึกไม่สำเร็จ")
 
-    with col_s2:
-        st.write("🖼️ **โลโก้ร้าน**")
-        uploaded_logo = st.file_uploader("เลือกไฟล์ภาพ", type=['png', 'jpg', 'jpeg'])
-        if uploaded_logo: st.image(uploaded_logo, width=100)
-
-# --- 2. ข้อมูลลูกค้า & เอกสาร ---
-col_main, col_cart = st.columns([1.5, 1])
-
-with col_main:
+    # --- 2. Customer Info ---
     st.subheader("👤 ข้อมูลลูกค้า")
-    # Search (ถ้า DataFrame ว่าง ให้ใส่ list ว่างๆ ไว้ก่อน กัน Error)
-    cust_options = [""] + list(cust_df['Name'].unique()) if not cust_df.empty else [""]
-    sel_cust = st.selectbox("🔍 ค้นหาลูกค้าเก่า", cust_options)
+    cust_opts = [""] + list(cust_df['Name'].unique()) if not cust_df.empty else [""]
+    sel_cust = st.selectbox("🔍 ค้นหาลูกค้า", cust_opts)
     
     if sel_cust and sel_cust != st.session_state.get('last_c'):
         r = cust_df[cust_df['Name'] == sel_cust].iloc[0]
@@ -277,43 +362,37 @@ with col_main:
     c1, c2 = st.columns(2)
     st.session_state.f_n = c1.text_input("ชื่อลูกค้า", st.session_state.f_n)
     st.session_state.f_t = c2.text_input("Tax ID (ลูกค้า)", st.session_state.f_t)
-    st.session_state.f_a = st.text_area("ที่อยู่ลูกค้า", st.session_state.f_a, height=68)
+    st.session_state.f_a = st.text_area("ที่อยู่ลูกค้า", st.session_state.f_a)
     st.session_state.f_tel = st.text_input("เบอร์โทร", st.session_state.f_tel)
     
-    # ปุ่มล้าง/จำค่า
-    b_clr, b_save = st.columns(2)
-    if b_clr.button("🧹 ล้างค่า"):
-        st.session_state.f_n = ""; st.session_state.f_t = ""; st.session_state.f_a = ""; st.session_state.f_tel = ""
+    if st.button("🧹 ล้างค่า"):
+        for k in ['f_n','f_t','f_a','f_tel']: st.session_state[k] = ""
         st.rerun()
-    if b_save.button("💾 จำค่าลูกค้า"):
-        try:
-            sh.worksheet("Customers").append_row([st.session_state.f_n, st.session_state.f_t, st.session_state.f_a, "", st.session_state.f_tel])
-            st.toast("บันทึกลูกค้าใหม่แล้ว")
-        except: st.error("บันทึกไม่ผ่าน")
 
     st.divider()
+    
+    # --- 3. Document Settings ---
     st.subheader("📄 ตั้งค่าเอกสาร")
     doc_type = st.radio("ประเภท", ["Full", "ABB"], horizontal=True)
     run_key = "Full_No" if doc_type == "Full" else "Abb_No"
-    # ดึงเลขล่าสุดมาโชว์
     curr_run = conf.get(run_key, "INV-000")
-    run_no = st.text_input("เลขที่เอกสาร (แก้ไขได้)", value=curr_run)
-    doc_date = st.date_input("วันที่", datetime.now())
+    
+    col_d1, col_d2 = st.columns(2)
+    run_no = col_d1.text_input("เลขที่เอกสาร", value=curr_run)
+    doc_date = col_d2.date_input("วันที่", datetime.now())
     vat_inc = st.checkbox("ราคารวม VAT แล้ว", value=True)
 
-# --- 3. ตะกร้าสินค้า ---
-with col_cart:
+with col_R:
+    # --- 4. Cart ---
     st.subheader("🛒 รายการสินค้า")
     item_opts = [""] + list(item_df['ItemName'].unique()) if not item_df.empty else [""]
     sel_item = st.selectbox("สินค้า", item_opts)
     
-    col_q, col_p = st.columns(2)
-    qty = col_q.number_input("จำนวน", 1, 100, 1)
-    price = col_p.number_input("ราคา", 0.0, step=10.0)
-    
-    if st.button("➕ เพิ่มรายการ"):
-        if sel_item:
-            st.session_state.cart.append({"name": sel_item, "qty": qty, "price": price})
+    c1, c2, c3 = st.columns([1, 1, 1])
+    qty = c1.number_input("จำนวน", 1, value=1)
+    price = c2.number_input("ราคา", 0.0)
+    if c3.button("➕ เพิ่ม"):
+        if sel_item: st.session_state.cart.append({"name": sel_item, "qty": qty, "price": price})
     
     if st.session_state.cart:
         df_cart = pd.DataFrame(st.session_state.cart)
@@ -321,84 +400,46 @@ with col_cart:
         st.dataframe(df_cart, use_container_width=True, hide_index=True)
         
         grand_total = df_cart['Total'].sum()
-        st.markdown(f"### 💰 รวม: {grand_total:,.2f}")
+        st.info(f"💰 ยอดรวม: {grand_total:,.2f} บาท")
         
         if st.button("❌ ลบรายการล่าสุด"):
-            st.session_state.cart.pop()
-            st.rerun()
+            st.session_state.cart.pop(); st.rerun()
             
-        st.markdown("---")
+        st.divider()
+        use_backup = st.checkbox("Backup ลง Drive", value=True)
         
-        # 🟢 FINAL BUTTON
-        if st.button("🖨️ ออกใบกำกับภาษี & Save", type="primary", use_container_width=True):
-            if not st.session_state.f_n:
-                st.error("ใส่ชื่อลูกค้าก่อนครับ")
-            else:
-                with st.spinner("กำลังทำงาน..."):
-                    # 1. Save SalesLog (Date, Amount)
-                    try:
-                        sh.worksheet("SalesLog").append_row([str(doc_date), grand_total])
-                    except: st.warning("บันทึกยอดขายไม่ได้ (แต่จะออก PDF ให้)")
-
-                    # 2. Update Running No
-                    try:
-                        # Auto Increment Logic
-                        p = re.match(r"([A-Za-z0-9\-]+?)(\d+)$", run_no)
-                        if p:
-                            nxt = f"{p.group(1)}{str(int(p.group(2))+1).zfill(len(p.group(2)))}"
-                            ws_conf = sh.worksheet("Config")
-                            # หา cell ที่ key ตรงกัน
-                            cell = ws_conf.find(run_key)
-                            ws_conf.update_cell(cell.row, 2, nxt)
-                    except: pass
-
-                    # 3. Generate PDF
-                    d_data = {
-                        "shop_name": st.session_state.s_n, "shop_tax": st.session_state.s_t, "shop_addr": st.session_state.s_a,
-                        "cust_name": st.session_state.f_n, "cust_tax": st.session_state.f_t, "cust_addr": st.session_state.f_a, "cust_tel": st.session_state.f_tel
-                    }
-                    pdf = generate_pdf_v106(d_data, st.session_state.cart, doc_type, run_no, str(doc_date), vat_inc, uploaded_logo)
-                    fname = f"INV_{run_no}.pdf"
-                    
-                    # 4. Upload via Webhook
-                    try:
-                        payload = {"filename": fname, "mimeType": "application/pdf", "file": base64.b64encode(pdf.getvalue()).decode('utf-8'), "folderId": DRIVE_FOLDER_ID}
-                        requests.post(APPS_SCRIPT_URL, json=payload)
-                        st.success("✅ Backup ลง Drive เรียบร้อย")
-                    except: st.error("⚠️ Backup ไม่ผ่าน (แต่โหลดไฟล์ได้)")
-                    
-                    # 5. Download Link
-                    st.download_button("⬇️ Download PDF", pdf, fname, "application/pdf")
-                    
-                    # Clear Cart
-                    st.session_state.cart = []
-
-# --- Sidebar Queue (Hybrid) ---
-with st.sidebar:
-    st.divider()
-    st.subheader("☁️ Queue Online")
-    if st.button("🔄 Refresh Queue"): st.rerun()
-    
-    if ws_q:
-        try:
-            q_recs = ws_q.get_all_records()
-            q_df = pd.DataFrame(q_recs)
-            pending = q_df[q_df['Status'] != 'Done']
-            for i, r in pending.iterrows():
-                st.info(f"{r['Name']} ({r['Price']})")
-                if st.button("ดึง", key=f"q_{i}"):
-                    st.session_state.f_n = r['Name']
-                    st.session_state.f_t = str(r['TaxID'])
-                    st.session_state.f_a = f"{r['Address1']} {r['Address2']}"
-                    st.session_state.f_tel = str(r['Phone'])
-                    # Auto add item
-                    if r['Item']:
-                        try: p = float(str(r['Price']).replace(',',''))
-                        except: p = 0.0
-                        st.session_state.cart = [{"name": r['Item'], "qty": 1, "price": p}]
-                    
-                    # Mark Done immediately
-                    ws_q.update_cell(i+2, 10, "Done")
-                    st.rerun()
-        except: st.caption("No Queue / Connect Error")
-
+        if st.button("🖨️ ออกใบกำกับภาษี (Generate)", type="primary", use_container_width=True):
+            if not st.session_state.f_n: st.error("ใส่ชื่อลูกค้าก่อนครับ"); st.stop()
+            
+            with st.spinner("Processing..."):
+                # 1. Save SalesLog
+                try:
+                    sh.worksheet("SalesLog").append_row([str(doc_date), grand_total])
+                except: pass
+                
+                # 2. Update Running No
+                try:
+                    prefix = re.match(r"([A-Za-z0-9\-]+?)(\d+)$", run_no)
+                    if prefix:
+                        nxt = f"{prefix.group(1)}{str(int(prefix.group(2))+1).zfill(len(prefix.group(2)))}"
+                        cell = ws_conf.find(run_key)
+                        ws_conf.update_cell(cell.row, 2, nxt)
+                except: pass
+                
+                # 3. Gen PDF
+                d_data = {
+                    "shop_name": st.session_state.s_n, "shop_tax": st.session_state.s_t, "shop_addr": st.session_state.s_a,
+                    "cust_name": st.session_state.f_n, "cust_tax": st.session_state.f_t, "cust_addr": st.session_state.f_a, "cust_tel": st.session_state.f_tel
+                }
+                pdf = generate_pdf_v107(d_data, st.session_state.cart, doc_type, run_no, str(doc_date), vat_inc, logo_up)
+                
+                # 4. Backup
+                fname = f"INV_{run_no}.pdf"
+                bk_msg = ""
+                if use_backup:
+                    if upload_via_webhook(pdf, fname): bk_msg = "✅ Backup OK"
+                    else: bk_msg = "⚠️ Backup Failed"
+                
+                st.success(f"เรียบร้อย! {bk_msg}")
+                st.download_button("⬇️ Download PDF", pdf, fname, "application/pdf")
+                st.session_state.cart = [] # Clear
