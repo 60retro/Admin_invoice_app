@@ -4,3 +4,4 @@ oauth2client
 pandas
 reportlab
 google-api-python-client
+fpdf
