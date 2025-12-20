@@ -150,7 +150,7 @@ def generate_pdf_v87_exact(doc_data, items, doc_type, run_no, date_str, vat_inc,
         font_std = 11; font_bold = 12; line_h = 12
         
         # Logo
-        logo_w = 110; logo_h = 55
+        logo_w = 160; logo_h = 80
         if logo_stream:
             try:
                 # Reset stream pointer just in case it was read before
@@ -162,7 +162,7 @@ def generate_pdf_v87_exact(doc_data, items, doc_type, run_no, date_str, vat_inc,
                 pass
 
         # Shop Box
-        box_w = 260; box_h = 80
+        box_w = 200; box_h = 80
         box_x = width - margin - box_w; box_y = top_y - box_h + 10
         c.setLineWidth(1); c.roundRect(box_x, box_y, box_w, box_h, 8, stroke=1, fill=0)
         
@@ -427,6 +427,7 @@ with st.sidebar:
                         st.session_state.cart = [{"name": r['Item'], "qty": 1, "price": p}]
                     st.rerun()
         except: pass
+
 
 
 
