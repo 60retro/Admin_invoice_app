@@ -28,7 +28,7 @@ ADMIN_PASSWORD = "3457"
 APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbxlUwV9CaVXHBVmbvRwNCGaNanEsQyOlG8f0kc3BHAS_0X8pLp4KxZCtz_EojYBCvWl6w/exec" # 🟢 URL เดิม
 SHEET_NAME = "Invoice_Data"
 DRIVE_FOLDER_ID = "1zm2KN-W7jCfwYirs-nBVNTlROMyW19ur" # Your Folder ID
-LOGO_FILE_ID = "YOUR_LOGO_FILE_ID_HERE" # 🔴 REPLACE THIS WITH YOUR LOGO FILE ID
+LOGO_FILE_ID = "1nftUz6Y_deqC2lrNw68KRKgxArRIE0dy" # 🔴 REPLACE THIS WITH YOUR LOGO FILE ID
 
 # Load Font
 try:
@@ -427,3 +427,4 @@ with st.sidebar:
                         st.session_state.cart = [{"name": r['Item'], "qty": 1, "price": p}]
                     st.rerun()
         except: pass
+
