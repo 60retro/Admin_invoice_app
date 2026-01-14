@@ -86,12 +86,36 @@ def download_logo_from_drive(file_id):
         st.error(f"Error downloading logo from Drive: {e}")
         return None
 
+# 🟢 New Helper Function: Fix Missing Zero 🟢
+def fix_leading_zero(val, is_tax=False):
+    """Helper to restore missing leading zeros for TaxID and Phone."""
+    s = str(val).replace('.0', '').strip() # Remove .0 if it came as a float
+    if not s: return ""
+    
+    # Logic for Tax ID (Usually 13 digits, if 12 means 0 is missing)
+    if is_tax and len(s) == 12:
+        return "0" + s
+        
+    # Logic for Phone (If not starting with 0, add it)
+    if not is_tax and len(s) > 0 and not s.startswith('0'):
+        return "0" + s
+        
+    return s
+
 @st.cache_data(ttl=300)
 def load_static_data():
     try:
         client = get_gspread_client(); sh = client.open(SHEET_NAME)
         items = smart_request(lambda: pd.DataFrame(sh.worksheet("Items").get_all_records()))
         custs = smart_request(lambda: pd.DataFrame(sh.worksheet("Customers").get_all_records()))
+        
+        # 🟢 Apply Fix to DataFrame 🟢
+        if not custs.empty:
+            if 'TaxID' in custs.columns:
+                custs['TaxID'] = custs['TaxID'].apply(lambda x: fix_leading_zero(x, is_tax=True))
+            if 'Phone' in custs.columns:
+                custs['Phone'] = custs['Phone'].apply(lambda x: fix_leading_zero(x, is_tax=False))
+        
         return items, custs
     except: return pd.DataFrame(), pd.DataFrame()
 
@@ -418,8 +442,14 @@ with st.sidebar:
             q = pd.DataFrame(smart_request(ws_q.get_all_records))
             for i, r in q[q['Status']!='Done'].iterrows():
                 if st.button(f"{r['Name']}", key=f"q_{i}"):
-                    st.session_state.c_n = r['Name']; st.session_state.c_t = str(r['TaxID'])
-                    st.session_state.c_a1 = r['Address1']; st.session_state.c_a2 = r['Address2']; st.session_state.c_tel = str(r['Phone'])
+                    st.session_state.c_n = r['Name']
+                    
+                    # 🟢 Apply Fix to Queue Data 🟢
+                    st.session_state.c_t = fix_leading_zero(r['TaxID'], is_tax=True)
+                    st.session_state.c_tel = fix_leading_zero(r['Phone'], is_tax=False)
+                    
+                    st.session_state.c_a1 = r['Address1']; st.session_state.c_a2 = r['Address2']
+                    
                     st.session_state.q_idx = i + 2
                     if r['Item']:
                         try: p = float(str(r['Price']).replace(',',''))
@@ -427,9 +457,3 @@ with st.sidebar:
                         st.session_state.cart = [{"name": r['Item'], "qty": 1, "price": p}]
                     st.rerun()
         except: pass
-
-
-
-
-
-
