@@ -1,8 +1,8 @@
 import streamlit as st
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
-from googleapiclient.discovery import build # New import for Drive API
-from googleapiclient.http import MediaIoBaseDownload # New import for Drive API
+from googleapiclient.discovery import build
+from googleapiclient.http import MediaIoBaseDownload
 import pandas as pd
 from datetime import datetime
 from io import BytesIO
@@ -17,7 +17,8 @@ from reportlab.lib.pagesizes import A4
 from reportlab.lib.units import mm
 from reportlab.lib.utils import ImageReader
 import re
-import os # For path handling
+import os
+import streamlit.components.v1 as components # 🟢 1. New Import สำหรับรัน JavaScript
 
 # ==========================================
 # ⚙️ 1. Config
@@ -25,10 +26,10 @@ import os # For path handling
 st.set_page_config(page_title="Nami Admin V113", layout="wide", page_icon="🧾")
 
 ADMIN_PASSWORD = "3457"
-APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbxlUwV9CaVXHBVmbvRwNCGaNanEsQyOlG8f0kc3BHAS_0X8pLp4KxZCtz_EojYBCvWl6w/exec" # 🟢 URL เดิม
+APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbxlUwV9CaVXHBVmbvRwNCGaNanEsQyOlG8f0kc3BHAS_0X8pLp4KxZCtz_EojYBCvWl6w/exec"
 SHEET_NAME = "Invoice_Data"
-DRIVE_FOLDER_ID = "1zm2KN-W7jCfwYirs-nBVNTlROMyW19ur" # Your Folder ID
-LOGO_FILE_ID = "1nftUz6Y_deqC2lrNw68KRKgxArRIE0dy" # 🔴 REPLACE THIS WITH YOUR LOGO FILE ID
+DRIVE_FOLDER_ID = "1zm2KN-W7jCfwYirs-nBVNTlROMyW19ur"
+LOGO_FILE_ID = "1nftUz6Y_deqC2lrNw68KRKgxArRIE0dy"
 
 # Load Font
 try:
@@ -56,12 +57,10 @@ def get_gspread_client():
 
 @st.cache_resource
 def get_drive_service():
-    """Creates a Google Drive API service object."""
     creds = get_credentials()
     return build('drive', 'v3', credentials=creds)
 
 def smart_request(func, *args):
-    """Auto-retry when Google blocks (Quota Exceeded)"""
     for i in range(3):
         try: return func(*args)
         except Exception as e:
@@ -69,9 +68,8 @@ def smart_request(func, *args):
             raise e
     return func(*args)
 
-@st.cache_data(ttl=3600) # Cache for 1 hour
+@st.cache_data(ttl=3600)
 def download_logo_from_drive(file_id):
-    """Downloads the logo file from Google Drive into a BytesIO object."""
     try:
         service = get_drive_service()
         request = service.files().get_media(fileId=file_id)
@@ -80,26 +78,17 @@ def download_logo_from_drive(file_id):
         done = False
         while done is False:
             status, done = downloader.next_chunk()
-        file_stream.seek(0) # Reset pointer to beginning
+        file_stream.seek(0)
         return file_stream
     except Exception as e:
-        st.error(f"Error downloading logo from Drive: {e}")
+        st.error(f"Error downloading logo: {e}")
         return None
 
-# 🟢 New Helper Function: Fix Missing Zero 🟢
 def fix_leading_zero(val, is_tax=False):
-    """Helper to restore missing leading zeros for TaxID and Phone."""
-    s = str(val).replace('.0', '').strip() # Remove .0 if it came as a float
+    s = str(val).replace('.0', '').strip()
     if not s: return ""
-    
-    # Logic for Tax ID (Usually 13 digits, if 12 means 0 is missing)
-    if is_tax and len(s) == 12:
-        return "0" + s
-        
-    # Logic for Phone (If not starting with 0, add it)
-    if not is_tax and len(s) > 0 and not s.startswith('0'):
-        return "0" + s
-        
+    if is_tax and len(s) == 12: return "0" + s
+    if not is_tax and len(s) > 0 and not s.startswith('0'): return "0" + s
     return s
 
 @st.cache_data(ttl=300)
@@ -108,14 +97,9 @@ def load_static_data():
         client = get_gspread_client(); sh = client.open(SHEET_NAME)
         items = smart_request(lambda: pd.DataFrame(sh.worksheet("Items").get_all_records()))
         custs = smart_request(lambda: pd.DataFrame(sh.worksheet("Customers").get_all_records()))
-        
-        # 🟢 Apply Fix to DataFrame 🟢
         if not custs.empty:
-            if 'TaxID' in custs.columns:
-                custs['TaxID'] = custs['TaxID'].apply(lambda x: fix_leading_zero(x, is_tax=True))
-            if 'Phone' in custs.columns:
-                custs['Phone'] = custs['Phone'].apply(lambda x: fix_leading_zero(x, is_tax=False))
-        
+            if 'TaxID' in custs.columns: custs['TaxID'] = custs['TaxID'].apply(lambda x: fix_leading_zero(x, is_tax=True))
+            if 'Phone' in custs.columns: custs['Phone'] = custs['Phone'].apply(lambda x: fix_leading_zero(x, is_tax=False))
         return items, custs
     except: return pd.DataFrame(), pd.DataFrame()
 
@@ -136,20 +120,19 @@ def upload_via_webhook(pdf_bytes, filename):
     except: return False
 
 # ==========================================
-# 🖨️ 3. PDF Generator (Copy from Desktop V87)
+# 🖨️ 3. PDF Generator
 # ==========================================
 def generate_pdf_v87_exact(doc_data, items, doc_type, run_no, date_str, vat_inc, logo_stream):
     buffer = BytesIO()
     c = canvas.Canvas(buffer, pagesize=A4)
     width, height = A4; half_height = height / 2
 
-    # 1. Calc Total Logic (Same as Desktop)
     total = sum([x['qty'] * x['price'] for x in items])
     if vat_inc:
         g = total; s = total / 1.07; v = g - s
     else:
         s = total; v = total * 0.07; g = s + v
-        g = math.floor(g) # Desktop logic
+        g = math.floor(g)
 
     def wrap_text_lines(text, width_limit, font_name, font_size):
         c.setFont(font_name, font_size)
@@ -166,80 +149,55 @@ def generate_pdf_v87_exact(doc_data, items, doc_type, run_no, date_str, vat_inc,
         return lines if lines else [""]
 
     def draw_invoice(y_offset):
-        # 🟢 Variables from Desktop V87
-        margin = 15 * mm
-        base_y = y_offset
-        top_y = base_y + half_height - margin
-        page_w = width - (2 * margin)
-        font_std = 11; font_bold = 12; line_h = 12
-        
-        # Logo
+        margin = 15 * mm; base_y = y_offset; top_y = base_y + half_height - margin
+        page_w = width - (2 * margin); font_std = 11; font_bold = 12; line_h = 12
         logo_w = 160; logo_h = 80
         if logo_stream:
             try:
-                # Reset stream pointer just in case it was read before
                 logo_stream.seek(0)
                 img = ImageReader(logo_stream)
                 c.drawImage(img, margin, top_y - logo_h + 5, width=logo_w, height=logo_h, preserveAspectRatio=True, mask='auto')
-            except Exception as e:
-                # print(f"Logo drawing error: {e}") 
-                pass
+            except: pass
 
-        # Shop Box
         box_w = 200; box_h = 80
         box_x = width - margin - box_w; box_y = top_y - box_h + 10
         c.setLineWidth(1); c.roundRect(box_x, box_y, box_w, box_h, 8, stroke=1, fill=0)
-        
-        c.setFont(FONT_NAME, font_bold)
-        c.drawString(box_x + 10, box_y + box_h - 15, doc_data['s_n'])
-        
+        c.setFont(FONT_NAME, font_bold); c.drawString(box_x + 10, box_y + box_h - 15, doc_data['s_n'])
         c.setFont(FONT_NAME, font_std)
-        raw_addr = doc_data['s_a'].split('\n')
-        cur_sy = box_y + box_h - 30
+        raw_addr = doc_data['s_a'].split('\n'); cur_sy = box_y + box_h - 30
         for line in raw_addr:
             wrapped = wrap_text_lines(line, box_w - 20, FONT_NAME, font_std)
             for w in wrapped:
                 if cur_sy < box_y + 5: break
                 c.drawString(box_x + 10, cur_sy, w); cur_sy -= line_h
 
-        # Title
         t_str = "ใบกำกับภาษี / ใบเสร็จรับเงิน" if doc_type == "Full" else "ใบกำกับภาษีอย่างย่อ (ABB)"
         full_title = f"ต้นฉบับ {t_str}" if y_offset > 0 else f"สำเนา {t_str}"
         if doc_type == "ABB": full_title = t_str
-
         title_y = box_y - 20
-        c.setFont(FONT_NAME, font_bold + 2)
-        center_x_left = margin + ((box_x - margin) / 2)
+        c.setFont(FONT_NAME, font_bold + 2); center_x_left = margin + ((box_x - margin) / 2)
         c.drawCentredString(center_x_left, title_y, full_title)
-        
         bar_y = title_y - 20
         c.setFont(FONT_NAME, font_std)
         c.drawString(margin, bar_y, f"เลขประจำตัวผู้เสียภาษีอากร : {doc_data['s_t']}")
         c.drawRightString(width - margin, bar_y, f"เลขที่ : {run_no}")
 
-        # Info Box
         info_box_y = bar_y - 5; info_box_h = 75; info_box_btm = info_box_y - info_box_h
         c.rect(margin, info_box_btm, page_w, info_box_h)
-        div_x = width - margin - 200
-        c.line(div_x, info_box_y, div_x, info_box_btm)
-        
+        div_x = width - margin - 200; c.line(div_x, info_box_y, div_x, info_box_btm)
         cx = margin + 10; cy = info_box_y - 12; label_anchor = cx + 110
         c.setFont(FONT_NAME, font_bold); c.drawRightString(label_anchor, cy, "เลขประจำตัวผู้เสียภาษีอากร :")
         c.setFont(FONT_NAME, font_std); c.drawString(label_anchor + 5, cy, doc_data['c_t'])
-        
         cy -= 12
         c.setFont(FONT_NAME, font_bold); c.drawRightString(label_anchor, cy, "ชื่อลูกค้า :")
-        c.setFont(FONT_NAME, font_std)
-        avail_w = div_x - (label_anchor + 5) - 5
+        c.setFont(FONT_NAME, font_std); avail_w = div_x - (label_anchor + 5) - 5
         for l in wrap_text_lines(doc_data['c_n'], avail_w, FONT_NAME, font_std):
             c.drawString(label_anchor + 5, cy, l); cy -= 10
         cy -= 2
-        
         c.setFont(FONT_NAME, font_bold); c.drawRightString(label_anchor, cy, "ที่อยู่ :")
         c.setFont(FONT_NAME, font_std)
         for l in wrap_text_lines(doc_data['c_a'], avail_w, FONT_NAME, font_std):
             c.drawString(label_anchor + 5, cy, l); cy -= 10
-            
         tel_y = info_box_btm + 5
         c.setFont(FONT_NAME, font_bold); c.drawRightString(label_anchor, tel_y, "โทรศัพท์ :")
         c.setFont(FONT_NAME, font_std); c.drawString(label_anchor + 5, tel_y, doc_data['c_tel'])
@@ -247,73 +205,92 @@ def generate_pdf_v87_exact(doc_data, items, doc_type, run_no, date_str, vat_inc,
         dx = div_x + 10; dy = info_box_y - 12
         c.setFont(FONT_NAME, font_bold)
         c.drawRightString(dx + 80, dy, "วันที่เอกสาร :"); c.drawRightString(dx + 80, dy - 12, "พนักงานขาย :"); c.drawRightString(dx + 80, dy - 24, "เงื่อนไขการชำระ :")
-        c.setFont(FONT_NAME, font_std)
-        c.drawString(dx + 85, dy, date_str); c.drawString(dx + 85, dy - 24, "สด")
+        c.setFont(FONT_NAME, font_std); c.drawString(dx + 85, dy, date_str); c.drawString(dx + 85, dy - 24, "สด")
 
-        # Table
         tbl_top = info_box_btm - 5
         c.setFillColorRGB(0.2, 0.2, 0.2); c.rect(margin, tbl_top - 14, page_w, 14, fill=1, stroke=1)
-        c.setFillColorRGB(1, 1, 1)
-        
-        col_w = [25, page_w - 215, 45, 70, 75]
+        c.setFillColorRGB(1, 1, 1); col_w = [25, page_w - 215, 45, 70, 75]
         col_x = [margin, margin+col_w[0], margin+col_w[0]+col_w[1], margin+col_w[0]+col_w[1]+col_w[2], margin+col_w[0]+col_w[1]+col_w[2]+col_w[3]]
-        
-        c.setFont(FONT_NAME, font_bold)
-        headers = ["ลำดับ", "รายการสินค้า", "จำนวน", "ราคาต่อหน่วย", "จำนวนเงิน"]
+        c.setFont(FONT_NAME, font_bold); headers = ["ลำดับ", "รายการสินค้า", "จำนวน", "ราคาต่อหน่วย", "จำนวนเงิน"]
         for i, h in enumerate(headers): c.drawCentredString(col_x[i] + col_w[i]/2, tbl_top - 10, h)
-        c.setFillColorRGB(0, 0, 0)
-        
-        current_y = tbl_top - 14
-        c.setFont(FONT_NAME, font_std)
-        
+        c.setFillColorRGB(0, 0, 0); current_y = tbl_top - 14; c.setFont(FONT_NAME, font_std)
         for idx, item in enumerate(items, start=1):
             if idx > 15: break
             nm_lines = wrap_text_lines(str(item['name']), col_w[1] - 10, FONT_NAME, font_std)
             if len(nm_lines) > 3: nm_lines = nm_lines[:3]
-            
-            txt_y = current_y - 12
-            c.drawCentredString(col_x[0] + col_w[0]/2, txt_y, str(idx))
+            txt_y = current_y - 12; c.drawCentredString(col_x[0] + col_w[0]/2, txt_y, str(idx))
             for i, l in enumerate(nm_lines): c.drawString(col_x[1] + 5, txt_y - (i*12), l)
             c.drawRightString(col_x[2] + col_w[2] - 10, txt_y, f"{item['qty']:,.0f}")
             c.drawRightString(col_x[3] + col_w[3] - 5, txt_y, f"{item['price']:,.2f}")
             c.drawRightString(col_x[4] + col_w[4] - 5, txt_y, f"{item['qty']*item['price']:,.2f}")
-            
-            current_y -= 45
-            c.setLineWidth(0.5); c.line(margin, current_y, width - margin, current_y)
-            
-        btm = current_y
-        c.rect(margin, btm, page_w, (tbl_top - 14) - btm)
+            current_y -= 45; c.setLineWidth(0.5); c.line(margin, current_y, width - margin, current_y)
+        btm = current_y; c.rect(margin, btm, page_w, (tbl_top - 14) - btm)
         for x in col_x[1:]: c.line(x, tbl_top - 14, x, btm)
-        
-        # Footer
-        f_top = btm; row_h = 14
-        lbls = ["จำนวนเงิน", "ส่วนลด", "ราคาสินค้า/บริการ", "ภาษีมูลค่าเพิ่ม 7%", "จำนวนเงินรวมทั้งสิ้น"]
+
+        f_top = btm; row_h = 14; lbls = ["จำนวนเงิน", "ส่วนลด", "ราคาสินค้า/บริการ", "ภาษีมูลค่าเพิ่ม 7%", "จำนวนเงินรวมทั้งสิ้น"]
         vals = [f"{s+v:,.2f}", "-", f"{s:,.2f}", f"{v:,.2f}", f"{g:,.2f}"]
-        
         c.line(col_x[4], f_top, col_x[4], f_top - (5 * row_h))
         c.line(width - margin, f_top, width - margin, f_top - (5 * row_h))
-        
         for i in range(5):
             r_top = f_top - (i * row_h); r_btm = r_top - row_h; t_y = r_btm + 4
             c.line(col_x[4], r_btm, width - margin, r_btm)
             c.setFont(FONT_NAME, font_std); c.drawRightString(col_x[4] - 15, t_y, lbls[i] + " :")
             if i == 4: c.setFont(FONT_NAME, font_bold)
             c.drawRightString(width - margin - 5, t_y, vals[i])
-            
-        sig_y = f_top - (5 * row_h) - 25
-        c.setFont(FONT_NAME, font_std)
+        sig_y = f_top - (5 * row_h) - 25; c.setFont(FONT_NAME, font_std)
         c.drawString(margin + 20, sig_y, "ผู้รับสินค้า ...........................................................")
         c.drawString(width - margin - 220, sig_y, "ผู้รับเงิน ...........................................................")
 
-    if doc_type == "ABB":
-        draw_invoice(half_height)
-    else:
-        draw_invoice(half_height)
-        c.setDash(3, 3); c.line(10, half_height, width-10, half_height); c.setDash(1, 0)
-        draw_invoice(0)
-    
-    c.save(); buffer.seek(0)
-    return buffer, g
+    if doc_type == "ABB": draw_invoice(half_height)
+    else: draw_invoice(half_height); c.setDash(3, 3); c.line(10, half_height, width-10, half_height); c.setDash(1, 0); draw_invoice(0)
+    c.save(); buffer.seek(0); return buffer, g
+
+# 🟢 2. New Function: JavaScript Injector 🟢
+def autoprint_and_download(pdf_bytes, filename):
+    """
+    Injects JS to trigger download AND open print dialog.
+    Work on PC, Android, and acts as 'best effort' on iPad.
+    """
+    b64 = base64.b64encode(pdf_bytes).decode()
+    js_code = f"""
+    <iframe id="pdf_iframe" style="display:none;"></iframe>
+    <script>
+        // 1. Setup PDF Data
+        var pdfData = "data:application/pdf;base64,{b64}";
+        var fileName = "{filename}";
+
+        // 2. Trigger Download (Browser default behavior)
+        var link = document.createElement('a');
+        link.href = pdfData;
+        link.download = fileName;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+
+        // 3. Trigger Print (With delay to let download start)
+        setTimeout(function() {{
+            var iframe = document.getElementById('pdf_iframe');
+            iframe.src = pdfData;
+            
+            // Wait for PDF to load in iframe then print
+            iframe.onload = function() {{
+                setTimeout(function() {{
+                    iframe.contentWindow.focus();
+                    iframe.contentWindow.print();
+                }}, 500);
+            }};
+            
+            // Fallback for some browsers that don't trigger onload for data URI well
+            setTimeout(function() {{
+                iframe.contentWindow.focus();
+                iframe.contentWindow.print();
+            }}, 2000);
+
+        }}, 1000);
+    </script>
+    """
+    # Use HTML component to inject script
+    components.html(js_code, height=0, width=0)
 
 # ==========================================
 # 🖥️ 4. UI Implementation
@@ -333,7 +310,6 @@ with st.sidebar:
         if st.button("Logout"): st.session_state.logged_in = False; st.rerun()
         if st.button("🔄 Sync DB"): st.cache_data.clear(); st.rerun()
 
-# Load Data
 try:
     sh, ws_conf, conf, ws_q = load_live_data()
     item_df, cust_df = load_static_data()
@@ -343,10 +319,7 @@ try:
         st.session_state.s_a = conf.get("Address","")
 except: st.error("DB Error (Quota)"); st.stop()
 
-st.title("🧾 Nami V113 (Drive Logo)")
-
-# 🔴🔴 DOWNLOAD LOGO FROM DRIVE HERE 🔴🔴
-# This puts the logo file in memory
+st.title("🧾 Nami V113 (Auto Print)")
 logo_io = download_logo_from_drive(LOGO_FILE_ID) 
 
 col1, col2 = st.columns([1.2, 1])
@@ -356,13 +329,8 @@ with col1:
         st.session_state.s_n = st.text_input("ร้าน", st.session_state.s_n)
         st.session_state.s_t = st.text_input("Tax", st.session_state.s_t)
         st.session_state.s_a = st.text_area("ที่อยู่", st.session_state.s_a)
-        
-        # Display logo if it was downloaded successfully
-        if logo_io:
-             st.image(logo_io, caption="Current Logo", width=150)
-        else:
-             st.warning("Could not load logo from Drive.")
-
+        if logo_io: st.image(logo_io, caption="Current Logo", width=150)
+        else: st.warning("Could not load logo from Drive.")
         if st.button("Save Shop Info"):
             smart_request(ws_conf.update_acell, 'B2', st.session_state.s_n)
             smart_request(ws_conf.update_acell, 'B3', st.session_state.s_t)
@@ -406,16 +374,18 @@ with col2:
         
         st.divider()
         use_bk = st.checkbox("Backup", value=True)
-        if st.button("🖨️ Print & Save", type="primary"):
+        
+        # 🟢 3. Modified Button Logic (No more st.download_button) 🟢
+        if st.button("🖨️ Print & Save (Auto)", type="primary"):
             if not st.session_state.c_n: st.error("No Name"); st.stop()
             with st.spinner("Processing..."):
                 d_data = {'s_n': st.session_state.s_n, 's_t': st.session_state.s_t, 's_a': st.session_state.s_a,
                           'c_n': st.session_state.c_n, 'c_t': st.session_state.c_t, 
                           'c_a': f"{st.session_state.c_a1} {st.session_state.c_a2}".strip(), 'c_tel': st.session_state.c_tel}
                 
-                # Use the downloaded logo stream
                 pdf, grand = generate_pdf_v87_exact(d_data, st.session_state.cart, doc_type, run_no, datetime.now().strftime("%d/%m/%Y"), vat_inc, logo_io)
                 
+                # ... (Logic เซฟลง Google Sheet เหมือนเดิม) ...
                 try:
                     smart_request(sh.worksheet("SalesLog").append_row, [datetime.now().strftime("%Y-%m-%d"), grand])
                     p = re.match(r"([A-Za-z0-9\-]+?)(\d+)$", run_no)
@@ -431,9 +401,11 @@ with col2:
                 fname = f"INV_{run_no}.pdf"
                 if use_bk: upload_via_webhook(pdf.getvalue(), fname)
                 
-                st.success("Done!")
-                st.download_button("Download", pdf, fname, "application/pdf")
-                st.session_state.cart = []
+                st.session_state.cart = [] # Clear cart
+                st.success("Saved! Printing & Downloading...")
+
+                # 🟢 Trigger JavaScript to Download AND Print
+                autoprint_and_download(pdf.getvalue(), fname)
 
 with st.sidebar:
     st.divider()
@@ -443,13 +415,9 @@ with st.sidebar:
             for i, r in q[q['Status']!='Done'].iterrows():
                 if st.button(f"{r['Name']}", key=f"q_{i}"):
                     st.session_state.c_n = r['Name']
-                    
-                    # 🟢 Apply Fix to Queue Data 🟢
                     st.session_state.c_t = fix_leading_zero(r['TaxID'], is_tax=True)
                     st.session_state.c_tel = fix_leading_zero(r['Phone'], is_tax=False)
-                    
                     st.session_state.c_a1 = r['Address1']; st.session_state.c_a2 = r['Address2']
-                    
                     st.session_state.q_idx = i + 2
                     if r['Item']:
                         try: p = float(str(r['Price']).replace(',',''))
