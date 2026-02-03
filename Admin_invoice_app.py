@@ -387,7 +387,7 @@ with col2:
                 
                 # ... (Logic เซฟลง Google Sheet เหมือนเดิม) ...
                 try:
-                    smart_request(sh.worksheet("SalesLog").append_row, [datetime.now().strftime("%Y-%m-%d"), grand])
+                    smart_request(sh.worksheet("SalesLog").append_row, [datetime.now().strftime("%Y-%m-%d"),run_no, grand])
                     p = re.match(r"([A-Za-z0-9\-]+?)(\d+)$", run_no)
                     if p:
                         nxt = f"{p.group(1)}{str(int(p.group(2))+1).zfill(len(p.group(2)))}"
@@ -425,3 +425,4 @@ with st.sidebar:
                         st.session_state.cart = [{"name": r['Item'], "qty": 1, "price": p}]
                     st.rerun()
         except: pass
+
