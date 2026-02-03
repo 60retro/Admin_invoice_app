@@ -18,7 +18,8 @@ from reportlab.lib.units import mm
 from reportlab.lib.utils import ImageReader
 import re
 import os
-import streamlit.components.v1 as components # 🟢 1. New Import สำหรับรัน JavaScript
+import pytz # ใช้สำหรับหาเวลาไทย
+import streamlit.components.v1 as components
 
 # ==========================================
 # ⚙️ 1. Config
@@ -118,6 +119,29 @@ def upload_via_webhook(pdf_bytes, filename):
         requests.post(APPS_SCRIPT_URL, json=payload)
         return True
     except: return False
+
+# 🟢 New Function: คำนวณเลขรันอัตโนมัติ (YYMMxxxxxx)
+def get_smart_run_no(last_no_from_db):
+    # 1. หาปีเดือนปัจจุบัน (Thai Year 2 digit + Month 2 digit)
+    # เช่น ปี 2568 เดือน 12 -> 6812
+    now = datetime.now(pytz.timezone('Asia/Bangkok'))
+    thai_year = str((now.year + 543) % 100) 
+    month = f"{now.month:02d}" 
+    current_prefix = f"{thai_year}{month}" 
+
+    # 2. ถ้าใน DB ว่างเปล่า ให้เริ่มใหม่เลย
+    if not last_no_from_db: 
+        return f"{current_prefix}000001"
+
+    str_last = str(last_no_from_db).strip()
+
+    # 3. เช็คว่าเลขใน DB ขึ้นต้นด้วย ปีเดือนปัจจุบัน หรือไม่?
+    if str_last.startswith(current_prefix):
+        # ถ้าใช่ (เดือนเดิม) ให้ใช้ค่าเดิม (ซึ่งคือเลข Next Available ที่เตรียมไว้)
+        return str_last
+    else:
+        # ถ้าไม่ใช่ (ขึ้นเดือนใหม่ หรือระบบเก่า INV-...) ให้ Reset เป็น 000001
+        return f"{current_prefix}000001"
 
 # ==========================================
 # 🖨️ 3. PDF Generator
@@ -245,51 +269,26 @@ def generate_pdf_v87_exact(doc_data, items, doc_type, run_no, date_str, vat_inc,
     else: draw_invoice(half_height); c.setDash(3, 3); c.line(10, half_height, width-10, half_height); c.setDash(1, 0); draw_invoice(0)
     c.save(); buffer.seek(0); return buffer, g
 
-# 🟢 2. New Function: JavaScript Injector 🟢
+# 🟢 JS Injector 🟢
 def autoprint_and_download(pdf_bytes, filename):
-    """
-    Injects JS to trigger download AND open print dialog.
-    Work on PC, Android, and acts as 'best effort' on iPad.
-    """
     b64 = base64.b64encode(pdf_bytes).decode()
     js_code = f"""
     <iframe id="pdf_iframe" style="display:none;"></iframe>
     <script>
-        // 1. Setup PDF Data
         var pdfData = "data:application/pdf;base64,{b64}";
         var fileName = "{filename}";
-
-        // 2. Trigger Download (Browser default behavior)
         var link = document.createElement('a');
-        link.href = pdfData;
-        link.download = fileName;
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-
-        // 3. Trigger Print (With delay to let download start)
+        link.href = pdfData; link.download = fileName;
+        document.body.appendChild(link); link.click(); document.body.removeChild(link);
         setTimeout(function() {{
             var iframe = document.getElementById('pdf_iframe');
             iframe.src = pdfData;
-            
-            // Wait for PDF to load in iframe then print
             iframe.onload = function() {{
-                setTimeout(function() {{
-                    iframe.contentWindow.focus();
-                    iframe.contentWindow.print();
-                }}, 500);
+                setTimeout(function() {{ iframe.contentWindow.focus(); iframe.contentWindow.print(); }}, 500);
             }};
-            
-            // Fallback for some browsers that don't trigger onload for data URI well
-            setTimeout(function() {{
-                iframe.contentWindow.focus();
-                iframe.contentWindow.print();
-            }}, 2000);
-
         }}, 1000);
     </script>
     """
-    # Use HTML component to inject script
     components.html(js_code, height=0, width=0)
 
 # ==========================================
@@ -355,8 +354,18 @@ with col1:
         st.rerun()
 
     st.divider()
+    # 🟢 Section เลขที่เอกสารอัตโนมัติ 🟢
     doc_type = st.radio("Type", ["Full", "ABB"], horizontal=True)
-    run_no = st.text_input("Doc No", value=conf.get("Full_No" if doc_type=="Full" else "Abb_No", "INV-000"))
+    
+    # 1. ดึงเลขล่าสุดจาก Config
+    raw_no = conf.get("Full_No" if doc_type=="Full" else "Abb_No", "")
+    
+    # 2. คำนวณเลขที่ควรจะเป็น (เช็คเดือน เช็คปี)
+    suggested_no = get_smart_run_no(raw_no)
+    
+    # 3. แสดงผลให้แก้ไขได้
+    run_no = st.text_input("Doc No (Auto)", value=suggested_no)
+    
     vat_inc = st.checkbox("VAT Included", value=True)
 
 with col2:
@@ -375,7 +384,6 @@ with col2:
         st.divider()
         use_bk = st.checkbox("Backup", value=True)
         
-        # 🟢 3. Modified Button Logic (No more st.download_button) 🟢
         if st.button("🖨️ Print & Save (Auto)", type="primary"):
             if not st.session_state.c_n: st.error("No Name"); st.stop()
             with st.spinner("Processing..."):
@@ -385,18 +393,34 @@ with col2:
                 
                 pdf, grand = generate_pdf_v87_exact(d_data, st.session_state.cart, doc_type, run_no, datetime.now().strftime("%d/%m/%Y"), vat_inc, logo_io)
                 
-                # ... (Logic เซฟลง Google Sheet เหมือนเดิม) ...
                 try:
-                    smart_request(sh.worksheet("SalesLog").append_row, [datetime.now().strftime("%Y-%m-%d"),run_no, grand])
-                    p = re.match(r"([A-Za-z0-9\-]+?)(\d+)$", run_no)
-                    if p:
-                        nxt = f"{p.group(1)}{str(int(p.group(2))+1).zfill(len(p.group(2)))}"
+                    # 🟢 บันทึกลง SalesLog (เพิ่ม run_no เข้าไปในช่องที่ 2)
+                    smart_request(sh.worksheet("SalesLog").append_row, [
+                        datetime.now().strftime("%Y-%m-%d"), 
+                        run_no, # เลขที่เอกสาร
+                        grand   # ยอดเงิน
+                    ])
+                    
+                    # 🟢 คำนวณเลขถัดไปเพื่อบันทึกกลับ Config
+                    nxt = ""
+                    if run_no.isdigit():
+                        # กรณีเลขล้วน (ระบบใหม่ YYMMxxxxxx) บวก 1 ได้เลย
+                        nxt = str(int(run_no) + 1)
+                    else:
+                        # กรณีเลขแบบเก่า INV-001 (เผื่อไว้)
+                        p = re.match(r"(.*?)(\d+)$", run_no)
+                        if p:
+                            nxt = f"{p.group(1)}{str(int(p.group(2))+1).zfill(len(p.group(2)))}"
+
+                    if nxt:
                         t_cell = 'B5' if doc_type == "Full" else 'B6'
                         smart_request(ws_conf.update_acell, t_cell, nxt)
+                    
                     if st.session_state.get('q_idx'):
                         smart_request(ws_q.update_cell, st.session_state.q_idx, 10, "Done")
                         st.session_state.q_idx = None
-                except: pass
+                except Exception as e: 
+                    st.warning(f"Error Saving: {e}")
                 
                 fname = f"INV_{run_no}.pdf"
                 if use_bk: upload_via_webhook(pdf.getvalue(), fname)
@@ -404,7 +428,6 @@ with col2:
                 st.session_state.cart = [] # Clear cart
                 st.success("Saved! Printing & Downloading...")
 
-                # 🟢 Trigger JavaScript to Download AND Print
                 autoprint_and_download(pdf.getvalue(), fname)
 
 with st.sidebar:
@@ -425,4 +448,3 @@ with st.sidebar:
                         st.session_state.cart = [{"name": r['Item'], "qty": 1, "price": p}]
                     st.rerun()
         except: pass
-
