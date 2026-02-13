@@ -183,7 +183,7 @@ def generate_pdf_v87_exact(doc_data, items, doc_type, run_no, date_str, vat_inc,
                 c.drawImage(img, margin, top_y - logo_h + 5, width=logo_w, height=logo_h, preserveAspectRatio=True, mask='auto')
             except: pass
 
-        box_w = 200; box_h = 80
+        box_w = 180; box_h = 60
         box_x = width - margin - box_w; box_y = top_y - box_h + 10
         c.setLineWidth(1); c.roundRect(box_x, box_y, box_w, box_h, 8, stroke=1, fill=0)
         c.setFont(FONT_NAME, font_bold); c.drawString(box_x + 10, box_y + box_h - 15, doc_data['s_n'])
@@ -448,3 +448,4 @@ with st.sidebar:
                         st.session_state.cart = [{"name": r['Item'], "qty": 1, "price": p}]
                     st.rerun()
         except: pass
+
